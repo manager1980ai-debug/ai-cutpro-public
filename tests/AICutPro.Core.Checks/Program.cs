@@ -6,6 +6,56 @@ static void Assert(bool condition, string message)
     if (!condition) throw new Exception("CHECK FAILED: " + message);
 }
 
+// Explicit sheet-fabrication intent: open geometry is not automatically defective.
+// These operations are strictly read-only previews, never a machine command.
+var operationSheet = new Sheet(200, 100);
+var simpleSplit = SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.OpenThroughCut, new(0, 50), new(200, 50),
+        StartInsetMm: 5, EndInsetMm: 5), operationSheet);
+Assert(simpleSplit.IsValid && simpleSplit.Segments.Count == 1 &&
+       simpleSplit.Segments[0].IsCut &&
+       Math.Abs(simpleSplit.Segments[0].Start.X - 5) < 1e-9 &&
+       Math.Abs(simpleSplit.Segments[0].End.X - 195) < 1e-9 &&
+       !simpleSplit.CanGenerateMachineCommands,
+       "Open split line with 5 mm end margins is valid for inspection only");
+var dottedSplit = SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.PerforatedCut, new(0, 60), new(30, 60),
+        StartInsetMm: 5, EndInsetMm: 5, CutLengthMm: 3, SkipLengthMm: 2),
+    operationSheet);
+Assert(dottedSplit.IsValid && dottedSplit.Segments.Count == 8 &&
+       dottedSplit.Segments.Count(segment => segment.IsCut) == 4 &&
+       dottedSplit.Segments.Count(segment => !segment.IsCut) == 4 &&
+       Math.Abs(dottedSplit.Segments[0].Start.X - 5) < 1e-9 &&
+       Math.Abs(dottedSplit.Segments[^1].End.X - 25) < 1e-9 &&
+       !dottedSplit.CanGenerateMachineCommands,
+       "Dotted line uses explicit 3 mm cuts and 2 mm skips within 5 mm margins");
+var bendReference = SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.BendReference, new(5, 10), new(195, 10)),
+    operationSheet);
+Assert(bendReference.IsValid &&
+       bendReference.Segments.All(s => !s.IsCut),
+       "Bend reference is not misinterpreted as a torch cut");
+var unassignedLine = SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.Unassigned, new(0, 50), new(200, 50)),
+    operationSheet);
+Assert(!unassignedLine.IsValid && unassignedLine.Segments.Count == 0,
+       "Unknown purpose never silently becomes a cutting operation");
+Assert(!SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.OpenThroughCut, new(0, 50), new(200, 50),
+        StartInsetMm: 101, EndInsetMm: 100), operationSheet).IsValid,
+       "Margins beyond line length rejected");
+Assert(!SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.OpenThroughCut, new(-1, 50), new(200, 50)),
+    operationSheet).IsValid, "Open line outside sheet rejected");
+Assert(!SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.PerforatedCut, new(0, 50), new(200, 50),
+        CutLengthMm: 0.00001, SkipLengthMm: 0.00001),
+    operationSheet).IsValid, "Excessive dotted pattern rejected");
+Assert(!SheetOperationPlanner.InspectOpenLine(
+    new(SheetOperationKind.PerforatedCut, new(0, 50), new(200, 50),
+        CutLengthMm: 2, SkipLengthMm: 0),
+    operationSheet).IsValid, "Zero-length perforation gap rejected");
+
 // B1.1: the offline diagnostic knowledge base is stable, localised and
 // provides honest in-app guidance without claiming unavailable repair tools.
 var diagnosticCodes = DxfDiagnosticCatalog.All.Select(e => e.Code).ToArray();
