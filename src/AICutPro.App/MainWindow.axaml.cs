@@ -462,7 +462,19 @@ public partial class MainWindow : Window
             PreviewPersistentAxisConstraints.RequireCompatibleEdit(
                 before,after,rules,toleranceMm);
         }
-        _dxfHistory.Push(verified,rules);
+        var lengths=_dxfHistory.CurrentLengthRules;
+        if(lengths.Count>0)
+        {
+            if(_dxfPreview is null)
+                throw new FormatException("No source drawing for pinned lengths.");
+            if(!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Invalid geometric tolerance.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var after=PreviewDxfExporter.ValidateDocument(verified,toleranceMm);
+            PreviewPersistentLengthConstraints.RequireCompatibleEdit(
+                before,after,lengths,toleranceMm);
+        }
+        _dxfHistory.Push(verified,rules,lengths);
         _dxfPreview = _dxfHistory.Current;
     }
 
@@ -636,9 +648,21 @@ public partial class MainWindow : Window
                 throw new FormatException("Неверные координаты вершины.");
             var verified=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
             var rules=_dxfHistory?.CurrentAxisRules ?? Array.Empty<PreviewAxisRule>();
-            var edited=PreviewPersistentAxisConstraints.MoveVertexConstrained(
-                verified,ringNumber-1,vertexNumber-1,new PreviewPoint(x,y),
-                rules,toleranceMm);
+            var lengths=_dxfHistory?.CurrentLengthRules ??
+                Array.Empty<PreviewLengthRule>();
+            var selectedVertex=vertexNumber-1;
+            var selectedRing=ringNumber-1;
+            var n=verified[selectedRing].Segments.Count;
+            var touchingLength=lengths.Any(rule=>rule.RingIndex==selectedRing &&
+                (rule.SegmentIndex==selectedVertex ||
+                 rule.SegmentIndex==(selectedVertex+n-1)%n));
+            var edited=touchingLength
+                ? PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
+                    verified,selectedRing,selectedVertex,new PreviewPoint(x,y),
+                    lengths,rules,toleranceMm)
+                : PreviewPersistentAxisConstraints.MoveVertexConstrained(
+                    verified,selectedRing,selectedVertex,new PreviewPoint(x,y),
+                    rules,toleranceMm);
             // Reimport the proposed drawing before replacing current preview.
             var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
             var imported=DxfReader.Parse(serialized);
@@ -1171,6 +1195,47 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is FormatException or ArgumentException)
         {
             StatusText.Text = "Изменение угла отклонено: " + ex.Message;
+        }
+    }
+
+    private void PinEdgeLengthClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) => ChangeLengthRule(add:true);
+
+    private void UnpinEdgeLengthClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) => ChangeLengthRule(add:false);
+
+    private void ChangeLengthRule(bool add)
+    {
+        try
+        {
+            if(_dxfPreview is null||_dxfHistory is null)
+                throw new FormatException("Сначала откройте DXF.");
+            if(!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный допуск DXF.");
+            if(!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber)||
+               !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var edgeNumber)||
+               ringNumber<1||edgeNumber<1)
+                throw new FormatException("Номера контура и ребра должны быть положительными.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var rules=add
+                ? PreviewPersistentLengthConstraints.Add(
+                    before,_dxfHistory.CurrentLengthRules,
+                    ringNumber-1,edgeNumber-1,toleranceMm)
+                : PreviewPersistentLengthConstraints.Remove(
+                    _dxfHistory.CurrentLengthRules,ringNumber-1,edgeNumber-1);
+            PreviewPersistentLengthConstraints.Verify(before,rules,toleranceMm);
+            _dxfHistory.Push(_dxfPreview,_dxfHistory.CurrentAxisRules,rules);
+            _dxfPreview=_dxfHistory.Current;
+            StatusText.Text=add
+                ? $"Длина ребра №{edgeNumber} контура №{ringNumber} закреплена. Undo/Redo доступны."
+                : $"Ограничение длины ребра №{edgeNumber} снято. Undo/Redo доступны.";
+            StatusText.Text+=" CAM и резка запрещены.";
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Ограничение длины отклонено: "+ex.Message;
         }
     }
 
