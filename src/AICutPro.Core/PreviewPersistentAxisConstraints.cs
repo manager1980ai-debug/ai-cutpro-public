@@ -85,6 +85,72 @@ public static class PreviewPersistentAxisConstraints
         Verify(after,rules,toleranceMm);
     }
 
+    /// <summary>
+    /// Project a requested vertex position onto every axis relation touching
+    /// that vertex. Other vertices remain fixed; contradictory coordinates
+    /// fail closed. Only the selected vertex can move, so no global solver
+    /// or hidden modification of neighbouring dimensions is implied.
+    /// </summary>
+    public static PreviewVertexEditResult MoveVertexConstrained(
+        IReadOnlyList<PreviewPath> rings,int ringIndex,int vertexIndex,
+        PreviewPoint requested,IReadOnlyList<PreviewAxisRule> rules,
+        double toleranceMm=0.01)
+    {
+        ArgumentNullException.ThrowIfNull(rings);
+        ArgumentNullException.ThrowIfNull(rules);
+        if(!double.IsFinite(requested.X)||!double.IsFinite(requested.Y)||
+           Math.Abs(requested.X)>1_000_000||Math.Abs(requested.Y)>1_000_000)
+            throw new FormatException("Invalid requested vertex coordinates.");
+        Verify(rings,rules,toleranceMm);
+        if(ringIndex<0||ringIndex>=rings.Count)
+            throw new FormatException("Invalid constrained vertex ring.");
+        var path=rings[ringIndex];
+        var count=path.Segments.Count;
+        if(!path.Closed||count is <3 or >2000||
+           path.Segments.Any(x=>x is not PreviewLine)||
+           vertexIndex<0||vertexIndex>=count)
+            throw new FormatException("Constrained vertex requires closed LINE-only ring.");
+
+        double? pinnedX=null,pinnedY=null;
+        var prev=(vertexIndex+count-1)%count;
+        foreach(var rule in rules)
+        {
+            if(rule.RingIndex!=ringIndex ||
+               (rule.SegmentIndex!=vertexIndex && rule.SegmentIndex!=prev))
+                continue;
+            var other=rule.SegmentIndex==vertexIndex
+                ? (PreviewLine)path.Segments[(vertexIndex+1)%count]
+                : (PreviewLine)path.Segments[prev];
+            var otherPoint=rule.SegmentIndex==vertexIndex
+                ? other.Start : other.Start;
+            // The opposite vertex is the outgoing edge's end, or the
+            // incoming edge's start. Both are fixed during this edit.
+            if(rule.SegmentIndex==vertexIndex)
+                otherPoint=((PreviewLine)path.Segments[vertexIndex]).End;
+            var value=rule.Horizontal?otherPoint.Y:otherPoint.X;
+            if(rule.Horizontal)
+            {
+                if(pinnedY is double current && Math.Abs(current-value)>toleranceMm*0.01)
+                    throw new FormatException("Conflicting horizontal relations at vertex.");
+                pinnedY=value;
+            }
+            else
+            {
+                if(pinnedX is double current && Math.Abs(current-value)>toleranceMm*0.01)
+                    throw new FormatException("Conflicting vertical relations at vertex.");
+                pinnedX=value;
+            }
+        }
+        var projected=new PreviewPoint(pinnedX??requested.X,pinnedY??requested.Y);
+        var edited=PreviewVertexEditor.MoveVertex(
+            rings,ringIndex,vertexIndex,projected,toleranceMm);
+        RequireCompatibleEdit(rings,edited.Rings,rules,toleranceMm);
+        PreviewDxfRoundTripVerifier.Verify(
+            edited.Rings,PreviewDxfExporter.Export(edited.Rings,toleranceMm),
+            toleranceMm);
+        return edited;
+    }
+
     private static void ValidateRule(
         IReadOnlyList<PreviewPath> rings,PreviewAxisRule rule,double toleranceMm)
     {
