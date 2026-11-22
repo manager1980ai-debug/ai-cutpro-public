@@ -1064,4 +1064,41 @@ var safeRoofRoundTrip = PreviewDxfExporter.ValidateDocument(
 Assert(PreviewContourTopology.Analyze(safeRoofRoundTrip).Rings[1].ParentIndex==0,
        "Nested-hole ownership survives verified DXF export/import");
 
+// B2 dimensional CAD editing: change one edge to an exact target length.
+// The end vertex slides along the original edge ray while the start is fixed.
+var lengthenedSquare = PreviewVertexEditor.SetEdgeLength([editSquare],0,0,12);
+var lengthEdge=(PreviewLine)lengthenedSquare.Rings[0].Segments[0];
+Assert(lengthenedSquare.IsValidForPreview && !lengthenedSquare.CanStartMachine &&
+       lengthEdge.Start==new PreviewPoint(0,0) &&
+       Math.Abs(lengthEdge.End.X-12)<1e-9 &&
+       Math.Abs(lengthEdge.End.Y)<1e-9 &&
+       Math.Abs(lengthenedSquare.NetAreaMm2-110)<1e-8,
+       "Changing first edge length preserves its anchor and recomputes material area");
+var closingLength = PreviewVertexEditor.SetEdgeLength([editSquare],0,3,12);
+var lastEdge=(PreviewLine)closingLength.Rings[0].Segments[3];
+Assert(Math.Abs(lastEdge.End.Y+2)<1e-8 &&
+       lastEdge.Start==new PreviewPoint(0,10) &&
+       Math.Abs(closingLength.NetAreaMm2-110)<1e-8,
+       "Last closing edge moves vertex zero and keeps its end attached");
+var lengthReopened=PreviewDxfExporter.ValidateDocument(
+    DxfReader.Parse(PreviewDxfExporter.Export(lengthenedSquare.Rings)));
+Assert(PreviewContourTopology.Analyze(lengthReopened).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(lengthReopened).NetAreaMm2-110)<1e-7,
+       "Dimensioned contour survives checked DXF export and reimport");
+static bool RejectEdgeLength(IReadOnlyList<PreviewPath> rings,
+    int ring, int segment, double length)
+{
+    try { PreviewVertexEditor.SetEdgeLength(rings,ring,segment,length); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectEdgeLength([editSquare],0,0,0) &&
+       RejectEdgeLength([editSquare],0,0,double.NaN) &&
+       RejectEdgeLength([editSquare],0,0,double.PositiveInfinity) &&
+       RejectEdgeLength([editSquare],0,0,1_000_001) &&
+       RejectEdgeLength([editSquare],0,99,12) &&
+       RejectEdgeLength([roundArcRing],0,0,12),
+       "Dimension editing rejects zero, invalid, extreme, missing and arc dimensions");
+Assert(RejectEdgeLength([roofOutline,roofHole],0,2,6),
+       "Reducing angled roof edge must reject loss of enclosed hole or crossing");
+
 Console.WriteLine("AI CutPro core checks passed.");
