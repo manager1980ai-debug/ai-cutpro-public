@@ -21,6 +21,9 @@ foreach (var entry in DxfDiagnosticCatalog.All)
            !entry.RepairAvailable,
            "Every DXF diagnostic has RU/EN explanations and honest repair status");
 Assert(DxfDiagnosticCatalog.Classify(
+    new FormatException("Invalid DXF number for group 10: NOT_A_NUMBER")).Code == "DXF-1003",
+    "Malformed coordinate is categorised as structure error, not unknown");
+Assert(DxfDiagnosticCatalog.Classify(
     new FormatException("Truncated DXF group pair.")).Code == "DXF-1003",
     "Malformed DXF resolves to stable structure-error code");
 Assert(DxfDiagnosticCatalog.Classify(
