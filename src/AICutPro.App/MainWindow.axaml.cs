@@ -415,7 +415,8 @@ public partial class MainWindow : Window
             // the stricter manufacturing preflight or a cutting permit.
             if (mixedTopology.Complete && mixedTopology.ClosedPaths.Count > 0)
             {
-                var nested = PreviewContourTopology.Analyze(mixedTopology.ClosedPaths, toleranceMm);
+                var policy = PreviewGeometryTolerancePolicy.Create(toleranceMm, toleranceMm);
+                var nested = policy.ValidateDrawing(mixedTopology.ClosedPaths);
                 contourNote += nested.IsValid
                     ? $" Аналитическая вложенность: {nested.Rings.Count} контур(ов), " +
                       $"площадь с учётом внутренних контуров {nested.NetAreaMm2:0.###} мм². " +
