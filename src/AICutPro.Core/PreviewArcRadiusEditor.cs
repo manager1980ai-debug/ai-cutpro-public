@@ -42,10 +42,13 @@ public static class PreviewArcRadiusEditor
         var dx=last.X-first.X;
         var dy=last.Y-first.Y;
         var chord=Math.Sqrt(dx*dx+dy*dy);
-        if (!double.IsFinite(chord) || chord <= toleranceMm ||
-            2*radiusMm < chord-1e-9)
-            throw new FormatException("Requested radius is smaller than half the ARC chord.");
+        if (!double.IsFinite(chord) || chord <= toleranceMm)
+            throw new FormatException("Selected ARC has an invalid chord.");
         var half=chord/2;
+        // Geometrically impossible radii must never be rounded up to a
+        // semicircle by an arbitrary epsilon near the chord/2 boundary.
+        if (radiusMm < half)
+            throw new FormatException("Requested radius is smaller than half the ARC chord.");
         var offset=Math.Sqrt(Math.Max(0,radiusMm*radiusMm-half*half));
         // The center's side of the directed chord is determined by the
         // traversal sign and whether the original arc is minor or major.
@@ -55,6 +58,9 @@ public static class PreviewArcRadiusEditor
         var middleY=(first.Y+last.Y)/2;
         var cx=middleX + side*(-dy/chord)*offset;
         var cy=middleY + side*(dx/chord)*offset;
+        if (!double.IsFinite(cx) || !double.IsFinite(cy) ||
+            Math.Abs(cx)>1_000_000 || Math.Abs(cy)>1_000_000)
+            throw new FormatException("ARC center is outside the supported CAD coordinate range.");
         var start=Math.Atan2(first.Y-cy,first.X-cx)*180/Math.PI;
         var small=2*Math.Asin(Math.Min(1,half/radiusMm))*180/Math.PI;
         var newSweep=Math.Sign(arc.SweepDegrees)*(minor?small:360-small);
