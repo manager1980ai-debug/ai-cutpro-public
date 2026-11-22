@@ -359,6 +359,12 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ShowSheetOperationsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        new SheetOperationsWindow().Show();
+        StatusText.Text = "Открыт предпросмотр технологических линий. Резка и CAM не разрешены.";
+    }
+
     private void ShowDxfDiagnosticsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         var diagnostics = new DxfDiagnosticsWindow(_dxfDiagnostics);
