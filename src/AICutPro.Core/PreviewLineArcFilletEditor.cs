@@ -9,7 +9,7 @@ public static class PreviewLineArcFilletEditor
     private const double Rad=Math.PI/180;
     private static double Mod(double a)=>(a%360+360)%360;
     private static double Distance(PreviewPoint a,PreviewPoint b)=>
-        Math.Hypot(a.X-b.X,a.Y-b.Y);
+        Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Y-b.Y)*(a.Y-b.Y));
 
     public static PreviewVertexEditResult FilletIncomingLine(
         IReadOnlyList<PreviewPath> rings,int ringIndex,int arcSegmentIndex,
@@ -65,7 +65,7 @@ public static class PreviewLineArcFilletEditor
                 var center=new PreviewPoint(touchLine.X+side*radiusMm*nx,
                                             touchLine.Y+side*radiusMm*ny);
                 var cx=center.X-arc.Center.X;var cy=center.Y-arc.Center.Y;
-                var centerDistance=Math.Hypot(cx,cy);
+                var centerDistance=Math.Sqrt(cx*cx+cy*cy);
                 if(centerDistance<=toleranceMm||!double.IsFinite(centerDistance))continue;
                 foreach(double radial in new[]{-1d,1d})
                 {
