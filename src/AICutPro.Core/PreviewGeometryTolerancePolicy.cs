@@ -38,4 +38,27 @@ public sealed class PreviewGeometryTolerancePolicy
 
     public PreviewTopologyResult Analyze(IReadOnlyList<PreviewPath> paths) =>
         PreviewContourTopology.Analyze(paths, TopologyMm);
+
+    /// <summary>
+    /// Full preview-only drawing inspection with explicit tolerances. Rejects
+    /// malformed individual rings before checking nesting; never starts a machine.
+    /// </summary>
+    public PreviewTopologyResult ValidateDrawing(IReadOnlyList<PreviewPath> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        if (paths.Count is < 1 or > 1000)
+            return new(false, [], 0, ["Invalid number of preview contours."]);
+        for (var i = 0; i < paths.Count; i++)
+        {
+            if (paths[i] is null)
+                return new(false, [], 0, [$"Contour {i + 1} is null."]);
+            var problems = ValidateContour(paths[i]);
+            if (problems.Count != 0)
+                return new(false, [], 0,
+                    problems.Select(p => $"Contour {i + 1}: {p}").ToArray());
+        }
+        // Every ring is individually inspected with JoinMm, while topology,
+        // pair intersections and containment use the separate TopologyMm.
+        return Analyze(paths);
+    }
 }
