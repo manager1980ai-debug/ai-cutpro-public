@@ -2188,6 +2188,36 @@ Assert(rigidMirrored.IsValidForPreview && mirrorTopo.IsValid &&
 PreviewDxfRoundTripVerifier.Verify(rigidMirrored.Rings,
     PreviewDxfExporter.Export(rigidMirrored.Rings));
 
+// B2: horizontal reflection around arbitrary Y must preserve exact arcs,
+// circular-hole ownership and net area. Two reflections are an identity.
+var horizontalMirrored=PreviewRigidTransformEditor.MirrorHorizontal(rigidPaths,125);
+var horizontalTopology=PreviewContourTopology.Analyze(horizontalMirrored.Rings);
+Assert(horizontalMirrored.IsValidForPreview && !horizontalMirrored.CanStartMachine &&
+       horizontalTopology.IsValid && horizontalTopology.Rings.Count==2 &&
+       Math.Abs(horizontalTopology.NetAreaMm2-rigidArea)<1e-6 &&
+       horizontalMirrored.Rings.SelectMany(p=>p.Segments)
+           .OfType<PreviewArc>().Any(a=>Math.Abs(a.Center.X-100)<1e-7 &&
+                                          Math.Abs(a.Center.Y-150)<1e-7 &&
+                                          a.SweepDegrees<0),
+       "Horizontal mirror moves circular hole across arbitrary Y and reverses ARC direction");
+var twiceHorizontal=PreviewRigidTransformEditor.MirrorHorizontal(
+    horizontalMirrored.Rings,125);
+var horizontalSerialized=PreviewDxfExporter.Export(twiceHorizontal.Rings);
+var horizontalReopened=PreviewDxfRoundTripVerifier.Verify(
+    twiceHorizontal.Rings,horizontalSerialized);
+var horizontalRestored=PreviewContourTopology.Analyze(horizontalReopened);
+Assert(horizontalRestored.IsValid && horizontalReopened.Count==rigidPaths.Count &&
+       Math.Abs(horizontalRestored.NetAreaMm2-rigidArea)<1e-6 &&
+       horizontalReopened.SelectMany(p=>p.Segments)
+           .OfType<PreviewArc>().Any(a=>Math.Abs(a.Center.X-100)<1e-7 &&
+                                          Math.Abs(a.Center.Y-100)<1e-7),
+       "Double horizontal reflection and DXF round-trip restore original hole and area");
+bool invalidHorizontalAxisRejected=false;
+try { PreviewRigidTransformEditor.MirrorHorizontal(rigidPaths,double.NaN); }
+catch(FormatException) { invalidHorizontalAxisRejected=true; }
+Assert(invalidHorizontalAxisRejected,
+       "Nonfinite horizontal mirror axis is rejected before any editing");
+
 static bool RejectRigidEdit(Func<PreviewVertexEditResult> edit)
 {
     try { edit(); return false; }
