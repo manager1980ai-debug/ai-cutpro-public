@@ -3141,6 +3141,40 @@ Assert(!defaultPreviewPolicy.ValidateDrawing(
            new PreviewPath[] { null! }).IsValid,
        "Drawing validation rejects null rings without throwing");
 
+// Explicitly test that intersection precision changes a borderline LINE/LINE
+// contact classification instead of merely storing a configuration number.
+static PreviewPath PreviewSquare(double x0, double y0, double x1, double y1)
+{
+    var corners = new[] {
+        new PreviewPoint(x0,y0), new PreviewPoint(x1,y0),
+        new PreviewPoint(x1,y1), new PreviewPoint(x0,y1) };
+    return new PreviewPath(Enumerable.Range(0,4)
+        .Select(i => (PreviewSegment)new PreviewLine(
+            corners[i], corners[(i+1)%4])).ToArray(), true);
+}
+var precisionLeft = PreviewSquare(0,0,10,10);
+var precisionRight = PreviewSquare(10.00005,0,20.00005,10);
+var preciseIntersections = PreviewGeometryTolerancePolicy.Create(
+    0.01,0.01,1e-7);
+var conservativeIntersections = PreviewGeometryTolerancePolicy.Create(
+    0.01,0.01,1e-4);
+Assert(preciseIntersections.ValidatePair(precisionLeft,precisionRight).Count==0,
+       "Separated rectangles remain distinct under precise intersection tolerance");
+Assert(conservativeIntersections.ValidatePair(precisionLeft,precisionRight).Count>0,
+       "Conservative intersection tolerance rejects near-contact ambiguity");
+Assert(preciseIntersections.IntersectionMm==1e-7 &&
+       conservativeIntersections.IntersectionMm==1e-4,
+       "Core intersection tolerance is explicitly configurable");
+foreach(var invalidIntersection in new[]{
+    -1d,0d,double.NaN,double.NegativeInfinity,1e-10,0.011 })
+{
+    bool rejected=false;
+    try { PreviewGeometryTolerancePolicy.Create(0.01,0.01,invalidIntersection); }
+    catch(ArgumentOutOfRangeException) { rejected=true; }
+    Assert(rejected,"Unsafe analytic intersection tolerance rejected");
+}
+
+
 
 // Optional independent-parser fixture export for CI. All source data
 // comes from already verified CAD preview geometry; another implementation
