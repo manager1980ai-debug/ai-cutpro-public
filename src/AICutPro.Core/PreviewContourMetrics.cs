@@ -14,10 +14,11 @@ public sealed record PreviewContourMetricsResult(
 public static class PreviewContourMetrics
 {
     /// <summary>Green's theorem, with arcs integrated exactly rather than flattened into chords.</summary>
-    public static PreviewContourMetricsResult Measure(PreviewPath path, double joinToleranceMm = 0.01)
+    public static PreviewContourMetricsResult Measure(PreviewPath path, double joinToleranceMm = 0.01,
+        double intersectionToleranceMm = 1e-7)
     {
         ArgumentNullException.ThrowIfNull(path);
-        var problems = PreviewContourValidator.Validate(path, joinToleranceMm);
+        var problems = PreviewContourValidator.Validate(path, joinToleranceMm, intersectionToleranceMm);
         if (problems.Count > 0)
             return Invalid(problems);
         // Shift the coordinate origin near the contour to reduce catastrophic cancellation
