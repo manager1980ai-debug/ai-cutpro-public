@@ -651,6 +651,57 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ChamferDxfVertexClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var vertexNumber) ||
+                ringNumber<1 || vertexNumber<1)
+                throw new FormatException("Номера контура и вершины должны быть положительными.");
+            if (!(double.TryParse(ChamferSetbackBox.Text,NumberStyles.Float,
+                    CultureInfo.CurrentCulture,out var setback) ||
+                  double.TryParse(ChamferSetbackBox.Text,NumberStyles.Float,
+                    CultureInfo.InvariantCulture,out setback)) ||
+                !double.IsFinite(setback))
+                throw new FormatException("Неверный отступ фаски.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var edited=PreviewChamferEditor.ChamferVertex(
+                before,ringNumber-1,vertexNumber-1,setback,toleranceMm);
+            var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
+            var imported=DxfReader.Parse(serialized);
+            if (imported.Warnings.Count>0)
+                throw new FormatException("DXF после фаски содержит предупреждения.");
+            var reopened=PreviewDxfRoundTripVerifier.Verify(
+                edited.Rings,serialized,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            if (!topology.IsValid || reopened.Count!=edited.Rings.Count ||
+                Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
+                    Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
+                throw new FormatException("Фаска не прошла независимый повторный импорт DXF.");
+            CommitDxfPreview(imported);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: фаска выбранного угла, только предпросмотр";
+            StatusText.Text=$"Фаска: контур №{ringNumber}, вершина №{vertexNumber}, "+
+                $"отступ {setback:0.###} мм; площадь {topology.NetAreaMm2:0.###} мм². "+
+                "Undo/Redo доступны, CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Создание фаски отклонено: "+ex.Message;
+        }
+    }
+
     // Numbered segment and vertex editing is deliberately restricted to
     // fully verified, closed straight-line rings. Nothing is sent to a machine.
     private void InsertDxfVertexClicked(object? sender,
