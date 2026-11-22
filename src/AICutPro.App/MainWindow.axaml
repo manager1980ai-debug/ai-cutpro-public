@@ -49,6 +49,9 @@
           <TextBox x:Name="EditVertexXBox" Text="0" Watermark="Новый X, мм"/>
           <TextBox x:Name="EditVertexYBox" Text="0" Watermark="Новый Y, мм"/>
           <Button Content="Переместить вершину (предпросмотр)" Click="EditDxfVertexClicked"/>
+          <Button Content="Вставить вершину на ребро (предпросмотр)" Click="InsertDxfVertexClicked"/>
+          <Button Content="Удалить вершину (предпросмотр)" Click="DeleteDxfVertexClicked"/>
+          <TextBlock Text="Вставка: номер вершины обозначает начало прямого ребра, X/Y задают точку на ребре. Удаление: X/Y не используются. Нумерация начинается с 1." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Только замкнутые прямолинейные контуры. Все изменения проверяются; дуговые вершины пока нельзя редактировать." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Сохранить проверенные контуры DXF" Click="ExportEditedDxfClicked"/>
           <TextBlock Text="Только замкнутые LINE/ARC/CIRCLE-контуры без предупреждений. Исходный файл не перезаписывается автоматически; резка отключена." TextWrapping="Wrap" Foreground="#9CB3C9"/>
