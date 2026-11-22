@@ -1565,7 +1565,11 @@ var nestedArcSet=PreviewArcRadiusEditor.SetRadius(
 Assert(PreviewContourTopology.Analyze(nestedArcSet.Rings).IsValid &&
        nestedArcSet.Rings.Count==2,
        "Nested analytic ARC edit retains hole identity");
-Assert(RejectArcRadius([rectContainingArc,nestedHalfDisc],1,0,100),
-       "ARC radius edit rejects topology collapse and outer-boundary crossing");
+var restoredHalfDisc = PreviewArcRadiusEditor.SetRadius(
+    nestedArcSet.Rings,1,0,10);
+Assert(Math.Abs(restoredHalfDisc.NetAreaMm2 -
+       PreviewContourTopology.Analyze([rectContainingArc,nestedHalfDisc]).NetAreaMm2) < 1e-6 &&
+       Math.Abs(((PreviewArc)restoredHalfDisc.Rings[1].Segments[0]).SweepDegrees-180)<1e-7,
+       "Endpoint-locked ARC radius can be restored without changing nested topology");
 
 Console.WriteLine("AI CutPro core checks passed.");
