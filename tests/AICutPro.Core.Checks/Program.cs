@@ -1202,4 +1202,49 @@ Assert(RejectAlteredDxf([asymmetricNotch],
        PreviewDxfExporter.Export([mirroredNotch])),
        "Segment-by-segment DXF verifier rejects mirrored geometry despite equal metrics");
 
+// B2: numeric editing of actual DXF CIRCLE holes, with strict containment.
+var circleDoc = Document(rectangle, circleHole);
+var enlargedHole = PreviewCircleHoleEditor.SetHole(circleDoc, 0, new PreviewPoint(100,50), 30);
+var circleAfter = (DxfCircle)enlargedHole.Shapes[1];
+Assert(Math.Abs(circleAfter.Radius-15)<1e-9 &&
+       Math.Abs(PreviewContourTopology.Analyze(
+           PreviewDxfExporter.ValidateDocument(enlargedHole)).NetAreaMm2-
+           (20000-Math.PI*225))<1e-6,
+       "Increasing circular hole diameter updates exact net area");
+var shiftedHole = PreviewCircleHoleEditor.SetHole(circleDoc,0,new PreviewPoint(120,50),20);
+Assert(((DxfCircle)shiftedHole.Shapes[1]).Center.X==120 &&
+       PreviewContourTopology.Analyze(
+           PreviewDxfExporter.ValidateDocument(shiftedHole)).IsValid,
+       "Moving a circular hole preserves containment and CAD topology");
+var twoCircleDoc = Document(rectangle,
+    new DxfCircle("HOLE",new Point2(50,50),10),
+    new DxfCircle("HOLE",new Point2(100,50),10));
+var secondMoved = PreviewCircleHoleEditor.SetHole(
+    twoCircleDoc,1,new PreviewPoint(115,50),20);
+Assert(((DxfCircle)secondMoved.Shapes[1]).Center.X==50 &&
+       ((DxfCircle)secondMoved.Shapes[2]).Center.X==115,
+       "Circle indexing targets only the selected DXF hole");
+static bool RejectHoleEdit(DxfImportResult doc, int index, double x, double y, double diameter)
+{
+    try { PreviewCircleHoleEditor.SetHole(doc,index,new PreviewPoint(x,y),diameter); return false; }
+    catch (FormatException) {return true;}
+}
+Assert(RejectHoleEdit(circleDoc,0,195,50,20) &&
+       RejectHoleEdit(circleDoc,0,100,50,110) &&
+       RejectHoleEdit(circleDoc,0,100,50,0) &&
+       RejectHoleEdit(circleDoc,0,double.NaN,50,20) &&
+       RejectHoleEdit(circleDoc,99,100,50,20),
+       "Hole editing rejects boundary contact, oversize, zero, NaN and invalid index");
+Assert(RejectHoleEdit(twoCircleDoc,0,90,50,20),
+       "Hole editing rejects intersections with another circular hole");
+Assert(RejectHoleEdit(Document(new DxfCircle("CUT",new Point2(50,50),20)),
+       0,50,50,30),
+       "An outer circular part cannot be edited as an inner hole");
+var editedHolePaths = PreviewDxfExporter.ValidateDocument(enlargedHole);
+var reopenedHolePaths = PreviewDxfRoundTripVerifier.Verify(
+    editedHolePaths, PreviewDxfExporter.Export(editedHolePaths));
+Assert(reopenedHolePaths.Count==2 &&
+       PreviewContourTopology.Analyze(reopenedHolePaths).IsValid,
+       "Edited circular hole survives strict DXF export/reimport checks");
+
 Console.WriteLine("AI CutPro core checks passed.");
