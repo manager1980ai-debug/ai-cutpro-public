@@ -11,11 +11,13 @@ public sealed class DxfPreviewHistory
     public const int MaximumStates = 31; // current + at most 30 undo operations
 
     private readonly List<DxfImportResult> _states = [];
+    private readonly List<IReadOnlyList<PreviewAxisRule>> _axisRules = [];
     private int _index;
 
     public DxfPreviewHistory(DxfImportResult initial)
     {
         _states.Add(Snapshot(initial));
+        _axisRules.Add([]);
     }
 
     public bool CanUndo => _index > 0;
@@ -23,17 +25,37 @@ public sealed class DxfPreviewHistory
     public int UndoCount => _index;
     public int RedoCount => _states.Count - 1 - _index;
     public DxfImportResult Current => Snapshot(_states[_index]);
+    public IReadOnlyList<PreviewAxisRule> CurrentAxisRules =>
+        _axisRules[_index].ToArray();
 
     /// <summary>Call only after an edit has passed geometry and DXF verification.</summary>
-    public void Push(DxfImportResult verifiedEdit)
+    public void Push(DxfImportResult verifiedEdit) =>
+        Push(verifiedEdit,CurrentAxisRules);
+
+    /// <summary>
+    /// Save geometry and persistent drafting relations in one Undo/Redo step.
+    /// Caller must verify both geometry and axis rules before committing.
+    /// </summary>
+    public void Push(DxfImportResult verifiedEdit,
+                     IReadOnlyList<PreviewAxisRule> rules)
     {
-        var clone = Snapshot(verifiedEdit);
-        if (_index < _states.Count - 1)
-            _states.RemoveRange(_index + 1, _states.Count - 1 - _index);
+        ArgumentNullException.ThrowIfNull(rules);
+        var clone=Snapshot(verifiedEdit);
+        if(rules.Count>PreviewPersistentAxisConstraints.MaximumRules)
+            throw new FormatException("Too many persistent axis constraints.");
+        if(_index < _states.Count-1)
+        {
+            _states.RemoveRange(_index+1,_states.Count-1-_index);
+            _axisRules.RemoveRange(_index+1,_axisRules.Count-1-_index);
+        }
         _states.Add(clone);
-        if (_states.Count > MaximumStates)
+        _axisRules.Add(rules.ToArray());
+        if(_states.Count>MaximumStates)
+        {
             _states.RemoveAt(0);
-        _index = _states.Count - 1;
+            _axisRules.RemoveAt(0);
+        }
+        _index=_states.Count-1;
     }
 
     public DxfImportResult Undo()
