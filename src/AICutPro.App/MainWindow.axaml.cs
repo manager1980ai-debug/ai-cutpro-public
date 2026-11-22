@@ -444,6 +444,19 @@ public partial class MainWindow : Window
                 : $"DXF: {gate.Profiles.Count} деталь(ей), чистая площадь {gate.NetAreaMm2 / 1_000_000:F3} м². " +
                   $"Геометрия прошла предварительную проверку; ещё требуется CAM и проверка станка. Резка запрещена.");
             StatusText.Text += contourNote;
+            // Preview remains visible even for rejected geometry. Surface a
+            // stable, offline diagnostic with a repair explanation; do not
+            // mistake a readable DXF for an approved manufacturing profile.
+            var geometryIssues = gate.BlockingIssues.Concat(mixedTopology.Warnings)
+                .Distinct(StringComparer.Ordinal).ToArray();
+            if (geometryIssues.Length > 0)
+            {
+                StatusText.Text += " Диагностика: " +
+                    string.Join(" | ", geometryIssues.Take(3)
+                        .Select(DxfDiagnosticCatalog.ExplainGeometryRu));
+                if (geometryIssues.Length > 3)
+                    StatusText.Text += $" (ещё {geometryIssues.Length - 3} замечаний; полная панель диагностики в разработке).";
+            }
             RenderSheet();
         }
         catch (Exception ex)
