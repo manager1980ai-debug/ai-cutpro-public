@@ -79,6 +79,7 @@ public static class DxfReader
         string? pendingSection = null;
         int? units = null;
         var sawEof = false;
+        var entitiesSectionCount = 0;
         for (int i = 0; i < pairs.Count;)
         {
             var p = pairs[i];
@@ -108,6 +109,8 @@ public static class DxfReader
             {
                 section = p.Value.ToUpperInvariant();
                 pendingSection = null;
+                if (section == "ENTITIES" && ++entitiesSectionCount > 1)
+                    warnings.Add("DXF contains multiple ENTITIES sections.");
                 i++;
                 continue;
             }
