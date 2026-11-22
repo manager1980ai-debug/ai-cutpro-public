@@ -470,8 +470,11 @@ def run_negative_graph_regressions():
     touching_rings = ezdxf.new().modelspace()
     add_rectangle(touching_rings,0,0,100,100)
     add_rectangle(touching_rings,0,20,20,40)
+    # A hole vertex touching the middle of the outer LINE is a T-junction.
+    # Its endpoint graph still has degree two, but the segment intersection
+    # auditor must reject this non-endpoint contact.
     try:
-        check_closed_contour_graph(list(touching_rings))
+        check_line_intersections(list(touching_rings))
     except AssertionError:
         pass
     else:
