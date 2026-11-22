@@ -72,6 +72,10 @@
           <Button Content="Переместить вершину (предпросмотр)" Click="EditDxfVertexClicked"/>
           <Button Content="Вставить вершину на ребро (предпросмотр)" Click="InsertDxfVertexClicked"/>
           <Button Content="Удалить вершину (предпросмотр)" Click="DeleteDxfVertexClicked"/>
+          <TextBlock Text="Фаска прямолинейного угла (отступ по обоим рёбрам, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <TextBox x:Name="ChamferSetbackBox" Text="5" Watermark="Отступ фаски, мм"/>
+          <Button Content="Снять фаску выбранной вершины (предпросмотр)" Click="ChamferDxfVertexClicked"/>
+          <TextBlock Text="Использует номера контура и вершины выше. Только замкнутые LINE-контуры; проверяются отверстия и DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Точный размер ребра, мм (номер вершины = начало ребра)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditEdgeLengthBox" Text="10" Watermark="Новая длина ребра, мм"/>
           <Button Content="Задать длину ребра (предпросмотр)" Click="SetDxfEdgeLengthClicked"/>
