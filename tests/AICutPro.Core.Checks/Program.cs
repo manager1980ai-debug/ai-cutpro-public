@@ -3100,4 +3100,39 @@ Assert(new DxfPreviewHistory(initialLengthDxf).CurrentLengthRules.Count==0 &&
        Math.Abs(((PreviewLine)lengthSource[0].Segments[0]).End.X-100)<1e-7,
        "New DXF session has no inherited length rules and original stays unchanged");
 
+// Optional independent-parser fixture export for CI. All source data
+// comes from already verified CAD preview geometry; another implementation
+// (ezdxf) independently parses and measures the serialized DXF entities.
+var externalDxfDirectory=Environment.GetEnvironmentVariable("AI_CUTPRO_CI_DXF_DIR");
+if(!string.IsNullOrWhiteSpace(externalDxfDirectory))
+{
+    Directory.CreateDirectory(externalDxfDirectory);
+    var externalSamples=new (string Name,IReadOnlyList<PreviewPath> Rings)[]
+    {
+        ("line_arc_tangent",tangentFillet.Rings),
+        ("arc_arc_tangent",arcArcResult.Rings),
+        ("two_pinned_lengths",dualAlternative.Rings),
+        ("constrained_rectangle_with_hole",propagatedWithHole.Rings)
+    };
+    var manifest=new List<object>();
+    foreach(var sample in externalSamples)
+    {
+        var name=sample.Name+".dxf";
+        File.WriteAllText(Path.Combine(externalDxfDirectory,name),
+                          PreviewDxfExporter.Export(sample.Rings));
+        manifest.Add(new
+        {
+            file=name,
+            lines=sample.Rings.Sum(r=>r.Segments.Count(x=>x is PreviewLine)),
+            arcs=sample.Rings.Sum(r=>r.Segments.Count(x=>x is PreviewArc)),
+            radii=sample.Rings.SelectMany(r=>r.Segments)
+                .OfType<PreviewArc>().Select(a=>a.RadiusMm)
+                .OrderBy(x=>x).ToArray(),
+            perimeter=sample.Rings.Sum(r=>PreviewContourMetrics.Measure(r).PerimeterMm)
+        });
+    }
+    File.WriteAllText(Path.Combine(externalDxfDirectory,"manifest.json"),
+                      JsonSerializer.Serialize(manifest));
+}
+
 Console.WriteLine("AI CutPro core checks passed.");
