@@ -284,7 +284,13 @@ public static class DxfReader
                         if (vertices.Count < 2) throw new FormatException("Invalid polyline vertices");
                         var count = Integer(fields, 90, vertices.Count);
                         if (count != vertices.Count) throw new FormatException("Polyline vertex count mismatch");
-                        var closed = (Integer(fields, 70) & 1) != 0;
+                        // The preview supports only the geometrically meaningful
+                        // closed bit. Other flags must not be interpreted as a
+                        // verified simple two-dimensional cutting contour.
+                        var polylineFlags = Integer(fields, 70);
+                        if ((polylineFlags & ~1) != 0)
+                            throw new FormatException("Unsupported LWPOLYLINE flags.");
+                        var closed = (polylineFlags & 1) != 0;
                         if (bulges.Any(b => Math.Abs(b) > 1e-12))
                         {
                             var curved = new DxfBulgedPolyline(layer, vertices, bulges, closed);
