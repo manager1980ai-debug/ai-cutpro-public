@@ -61,6 +61,13 @@
           <TextBlock Text="Начало прямого ребра остаётся на месте; конец смещается по его направлению. Проверяются все отверстия и пересечения." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Вставка: номер вершины обозначает начало прямого ребра, X/Y задают точку на ребре. Удаление: X/Y не используются. Нумерация начинается с 1." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Только замкнутые прямолинейные контуры. Все изменения проверяются; дуговые вершины пока нельзя редактировать." Foreground="#9CB3C9" TextWrapping="Wrap"/>
+          <TextBlock Text="Редактирование круглого отверстия CIRCLE" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
+          <TextBox x:Name="HoleCircleIndexBox" Text="1" Watermark="Номер CIRCLE, начиная с 1"/>
+          <TextBox x:Name="HoleCenterXBox" Text="100" Watermark="Центр X, мм"/>
+          <TextBox x:Name="HoleCenterYBox" Text="50" Watermark="Центр Y, мм"/>
+          <TextBox x:Name="HoleDiameterBox" Text="20" Watermark="Диаметр, мм"/>
+          <Button Content="Изменить круглое отверстие (предпросмотр)" Click="EditCircleHoleClicked"/>
+          <TextBlock Text="Только явный DXF CIRCLE внутри детали. Контуры, касания и вложенность проверяются; результат можно сохранить отдельно в DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Сохранить проверенные контуры DXF" Click="ExportEditedDxfClicked"/>
           <TextBlock Text="Только замкнутые LINE/ARC/CIRCLE-контуры без предупреждений. Исходный файл не перезаписывается автоматически; резка отключена." TextWrapping="Wrap" Foreground="#9CB3C9"/>
 
