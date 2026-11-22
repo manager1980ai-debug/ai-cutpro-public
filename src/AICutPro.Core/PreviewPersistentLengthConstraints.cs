@@ -78,10 +78,10 @@ public static class PreviewPersistentLengthConstraints
     }
 
     /// <summary>
-    /// Move a vertex around the fixed other end of its one pinned adjacent
-    /// edge, choosing the unique closest point on the required circle. Other
-    /// vertices are not moved. Two adjacent length pins are intentionally
-    /// refused rather than resolved by an ambiguous circle intersection.
+    /// Move a single vertex while preserving one or two adjacent pinned
+    /// lengths. A single pin projects onto a circle; two pins intersect two
+    /// circles analytically, trying the nearest valid branch first.
+    /// Other vertices stay fixed; topology and DXF validation are mandatory.
     /// </summary>
     public static PreviewVertexEditResult MoveVertexOnPinnedLength(
         IReadOnlyList<PreviewPath> rings,int ringIndex,int vertexIndex,
@@ -107,30 +107,85 @@ public static class PreviewPersistentLengthConstraints
         var previous=(vertexIndex+n-1)%n;
         var touching=lengths.Where(r=>r.RingIndex==ringIndex&&
             (r.SegmentIndex==previous||r.SegmentIndex==vertexIndex)).ToArray();
-        if(touching.Length!=1)
-            throw new FormatException("Exactly one pinned adjacent length is required.");
-        var rule=touching[0];
-        var edge=(PreviewLine)ring.Segments[rule.SegmentIndex];
-        var anchor=rule.SegmentIndex==vertexIndex?edge.End:edge.Start;
-        var dx=requested.X-anchor.X;
-        var dy=requested.Y-anchor.Y;
-        var distance=Math.Sqrt(dx*dx+dy*dy);
-        if(!double.IsFinite(distance)||distance<=toleranceMm)
-            throw new FormatException("Requested point coincides with pinned edge anchor.");
-        var point=new PreviewPoint(
-            anchor.X+rule.LengthMm*dx/distance,
-            anchor.Y+rule.LengthMm*dy/distance);
-        if(Math.Abs(point.X)>1_000_000||Math.Abs(point.Y)>1_000_000)
-            throw new FormatException("Projected point exceeds supported CAD bounds.");
-        var edited=PreviewVertexEditor.MoveVertex(
-            rings,ringIndex,vertexIndex,point,toleranceMm);
-        PreviewPersistentAxisConstraints.RequireCompatibleEdit(
-            rings,edited.Rings,axes,toleranceMm);
-        RequireCompatibleEdit(rings,edited.Rings,lengths,toleranceMm);
-        PreviewDxfRoundTripVerifier.Verify(
-            edited.Rings,PreviewDxfExporter.Export(edited.Rings,toleranceMm),
-            toleranceMm);
-        return edited;
+        if(touching.Length is <1 or >2)
+            throw new FormatException("One or two pinned adjacent lengths are required.");
+
+        var candidates=new List<PreviewPoint>();
+        if(touching.Length==1)
+        {
+            var rule=touching[0];
+            var edge=(PreviewLine)ring.Segments[rule.SegmentIndex];
+            var anchor=rule.SegmentIndex==vertexIndex?edge.End:edge.Start;
+            var dx=requested.X-anchor.X;
+            var dy=requested.Y-anchor.Y;
+            var distance=Math.Sqrt(dx*dx+dy*dy);
+            if(!double.IsFinite(distance)||distance<=toleranceMm)
+                throw new FormatException("Requested point coincides with pinned edge anchor.");
+            candidates.Add(new PreviewPoint(
+                anchor.X+rule.LengthMm*dx/distance,
+                anchor.Y+rule.LengthMm*dy/distance));
+        }
+        else
+        {
+            // Consecutive edges share exactly the moved vertex. Intersect
+            // circles centred at their fixed opposite endpoints. A tangent
+            // intersection has one candidate, otherwise two.
+            PreviewPoint Anchor(PreviewLengthRule rule)
+            {
+                var edge=(PreviewLine)ring.Segments[rule.SegmentIndex];
+                return rule.SegmentIndex==vertexIndex?edge.End:edge.Start;
+            }
+            var a=Anchor(touching[0]);
+            var b=Anchor(touching[1]);
+            var r1=touching[0].LengthMm;
+            var r2=touching[1].LengthMm;
+            var dx=b.X-a.X;
+            var dy=b.Y-a.Y;
+            var d=Math.Sqrt(dx*dx+dy*dy);
+            if(!double.IsFinite(d)||d<=toleranceMm)
+                throw new FormatException("Two pinned lengths have coincident anchors.");
+            if(d>r1+r2+toleranceMm*0.001||
+               d<Math.Abs(r1-r2)-toleranceMm*0.001)
+                throw new FormatException("Pinned length circles do not intersect.");
+            var along=(r1*r1-r2*r2+d*d)/(2*d);
+            var heightSq=r1*r1-along*along;
+            if(heightSq<-(toleranceMm*toleranceMm))
+                throw new FormatException("Pinned length circles have no real intersection.");
+            var height=Math.Sqrt(Math.Max(0,heightSq));
+            var ux=dx/d;
+            var uy=dy/d;
+            var baseX=a.X+along*ux;
+            var baseY=a.Y+along*uy;
+            candidates.Add(new PreviewPoint(baseX-height*uy,baseY+height*ux));
+            if(height>toleranceMm*0.001)
+                candidates.Add(new PreviewPoint(baseX+height*uy,baseY-height*ux));
+        }
+        var ordered=candidates.OrderBy(point=>
+            Math.Pow(point.X-requested.X,2)+Math.Pow(point.Y-requested.Y,2));
+        foreach(var point in ordered)
+        {
+            if(!double.IsFinite(point.X)||!double.IsFinite(point.Y)||
+               Math.Abs(point.X)>1_000_000||Math.Abs(point.Y)>1_000_000)
+                continue;
+            try
+            {
+                var edited=PreviewVertexEditor.MoveVertex(
+                    rings,ringIndex,vertexIndex,point,toleranceMm);
+                PreviewPersistentAxisConstraints.RequireCompatibleEdit(
+                    rings,edited.Rings,axes,toleranceMm);
+                RequireCompatibleEdit(rings,edited.Rings,lengths,toleranceMm);
+                PreviewDxfRoundTripVerifier.Verify(
+                    edited.Rings,PreviewDxfExporter.Export(edited.Rings,toleranceMm),
+                    toleranceMm);
+                return edited;
+            }
+            catch(FormatException)
+            {
+                // Try the other mathematical branch only if it also passes
+                // the entire topology, axis, length and DXF gate.
+            }
+        }
+        throw new FormatException("No topology-valid intersection of pinned length circles.");
     }
 
     private static PreviewLine Edge(
