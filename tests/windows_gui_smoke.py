@@ -140,6 +140,74 @@ def probe_malformed_dxf(executable):
 
 
 
+
+def probe_open_contour_layer(executable):
+    """A real open LINE in a known DXF layer must identify that layer."""
+    path = pathlib.Path.cwd() / "dist" / "gui_open_contour_layer.dxf"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n"
+        "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nCUT_TEST\n"
+        "10\n0\n20\n0\n11\n100\n21\n0\n0\nENDSEC\n0\nEOF\n",
+        encoding="ascii")
+    launched = subprocess.Popen([str(executable), "--open-dxf", str(path)],
+                                cwd=executable.parent)
+    try:
+        app = None
+        for _ in range(40):
+            if launched.poll() is not None:
+                raise RuntimeError("AI CutPro closed before open-contour inspection")
+            matches = [w for w in Desktop(backend="uia").windows()
+                       if w.process_id() == launched.pid
+                       and "AI CutPro" in w.window_text()]
+            if matches:
+                app = matches[0]
+                break
+            time.sleep(0.25)
+        if app is None:
+            raise RuntimeError("Open-contour DXF GUI not found")
+        for _ in range(30):
+            texts = [x.window_text() for x in app.descendants(control_type="Text")]
+            if any("GEO-3001" in t for t in texts):
+                break
+            time.sleep(0.25)
+        else:
+            raise RuntimeError("Open contour did not produce GEO-3001")
+        buttons = [b for b in app.descendants(control_type="Button")
+                   if b.window_text() == "Диагностика DXF (все замечания)"]
+        if len(buttons) != 1:
+            raise RuntimeError("Diagnostics button not found on open-contour GUI")
+        buttons[0].iface_invoke.Invoke()
+        report = None
+        for _ in range(30):
+            matches = [w for w in Desktop(backend="uia").windows()
+                       if w.process_id() == launched.pid
+                       and "Диагностика DXF" in w.window_text()]
+            if matches:
+                report = matches[0]
+                break
+            time.sleep(0.25)
+        if report is None:
+            raise RuntimeError("Open contour diagnostic window missing")
+        texts = [x.window_text() for x in report.descendants(control_type="Text")]
+        if not any("GEO-3001" in t and "CUT_TEST" in t for t in texts):
+            raise RuntimeError("Report missing layer-specific GEO-3001 finding")
+        if not any("Слой: CUT_TEST" in t for t in texts):
+            raise RuntimeError("Confirmed layer not displayed in diagnostic details")
+        if not any("Координаты проблемы: не определены" in t for t in texts):
+            raise RuntimeError("Unconfirmed coordinates not explicitly marked unknown")
+        report.close()
+        print("GUI layer diagnosis PASS: GEO-3001, CUT_TEST and unknown coordinates")
+    finally:
+        launched.terminate()
+        try:
+            launched.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            launched.kill()
+
+
+
+
 def main() -> None:
     # GitHub-hosted Windows consoles can default to a legacy codepage; the
     # Russian title is valid UI data and must not make logging fail.
@@ -182,6 +250,7 @@ def main() -> None:
                     capture.save(screenshot)
                     probe_tab_navigation(window)
                     probe_malformed_dxf(executable)
+                    probe_open_contour_layer(executable)
                     print(
                         f"GUI smoke passed: title={window.window_text()!r}, "
                         f"pid={process.pid}, handle={window.handle}, "
