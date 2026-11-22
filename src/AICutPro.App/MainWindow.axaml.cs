@@ -875,6 +875,54 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ExportCurrentDxf3DClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте или создайте DXF.");
+            if (!ParsePositiveDimension(Current3DThicknessBox.Text,out var thicknessMm))
+                throw new FormatException("Неверная толщина 3D-модели, мм.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный геометрический допуск DXF.");
+            var model = DxfSynchronized3DExporter.Export(
+                _dxfPreview,thicknessMm,toleranceMm);
+            var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "3D из текущего отредактированного DXF",
+                SuggestedFileName = "AI-CutPro-current-DXF-3D.scad",
+                DefaultExtension = "scad",
+                FileTypeChoices =
+                [
+                    new FilePickerFileType("OpenSCAD CAD model")
+                    {
+                        Patterns = ["*.scad"],
+                        MimeTypes = ["text/plain"]
+                    }
+                ]
+            });
+            if (target is null)
+            {
+                StatusText.Text = "Сохранение текущей 3D-модели отменено.";
+                return;
+            }
+            await using var stream = await target.OpenWriteAsync();
+            using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(model.OpenScad);
+            await writer.FlushAsync();
+            StatusText.Text = $"Текущий DXF экспортирован в OpenSCAD: " +
+                $"толщина {model.ThicknessMm:0.###} мм, " +
+                $"отверстий {model.HoleCount}, " +
+                $"объём {model.VolumeMm3:0.###} мм³. " +
+                "Состояние учитывает Undo/Redo. CAM и резка запрещены.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or IOException)
+        {
+            StatusText.Text = "3D-экспорт текущего DXF отклонён: " + ex.Message;
+        }
+    }
+
     private async void ExportPlate3DClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
