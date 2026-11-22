@@ -666,6 +666,63 @@ public partial class MainWindow : Window
         }
     }
 
+    private void PropagateConstrainedVerticesClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if(_dxfPreview is null||_dxfHistory is null)
+                throw new FormatException("Сначала откройте DXF.");
+            if(!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный допуск DXF.");
+            if(!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber)||
+               !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var vertexNumber)||
+               ringNumber<1||vertexNumber<1)
+                throw new FormatException("Номера контура и вершины должны быть положительными.");
+            static bool Number(string? raw,out double value)=>
+                (double.TryParse(raw,NumberStyles.Float,CultureInfo.CurrentCulture,out value)||
+                 double.TryParse(raw,NumberStyles.Float,CultureInfo.InvariantCulture,out value))&&
+                double.IsFinite(value);
+            if(!Number(EditVertexXBox.Text,out var x)||
+               !Number(EditVertexYBox.Text,out var y))
+                throw new FormatException("Некорректные координаты вершины.");
+            var original=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var rules=_dxfHistory.CurrentAxisRules;
+            var updated=PreviewAxisPropagationEditor.MoveConnectedVertices(
+                original,ringNumber-1,vertexNumber-1,new PreviewPoint(x,y),
+                rules,toleranceMm);
+            var serialized=PreviewDxfExporter.Export(updated.Rings,toleranceMm);
+            var candidate=DxfReader.Parse(serialized);
+            if(candidate.Warnings.Count>0)
+                throw new FormatException("DXF содержит предупреждения после правки.");
+            var reopened=PreviewDxfRoundTripVerifier.Verify(
+                updated.Rings,serialized,toleranceMm);
+            PreviewPersistentAxisConstraints.RequireCompatibleEdit(
+                original,reopened,rules,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            if(!topology.IsValid||reopened.Count!=updated.Rings.Count||
+               Math.Abs(topology.NetAreaMm2-updated.NetAreaMm2)>
+                   Math.Max(1e-6,Math.Abs(updated.NetAreaMm2)*1e-9))
+                throw new FormatException("Пересчёт не прошёл проверку DXF.");
+            CommitDxfPreview(candidate);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: пересчёт связанных вершин по ограничениям";
+            StatusText.Text=$"Контур №{ringNumber}, вершина №{vertexNumber}: "+
+                $"X {x:0.###}, Y {y:0.###} мм; "+
+                $"площадь {topology.NetAreaMm2:0.###} мм². "+
+                "Связанные координаты обновлены; Undo/Redo доступны. Резка запрещена.";
+            RenderSheet();
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Пересчёт связанных вершин отклонён: "+ex.Message;
+        }
+    }
+
     private void ChamferDxfVertexClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
