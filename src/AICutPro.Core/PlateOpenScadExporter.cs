@@ -19,6 +19,10 @@ public static class PlateOpenScadExporter
         if (!Valid(plate.WidthMm) || !Valid(plate.HeightMm) ||
             !Valid(plate.ThicknessMm) || plate.Holes.Count > 200)
             throw new FormatException("Unsupported 3D plate dimensions.");
+        if (!double.IsFinite(plate.NetAreaMm2) ||
+            !double.IsFinite(plate.VolumeMm3) ||
+            plate.NetAreaMm2 <= 0 || plate.VolumeMm3 <= 0)
+            throw new FormatException("Nonfinite or nonpositive 3D area or volume.");
         var validated = TextPlateSketch.Parse(
             "PLATE " + N(plate.WidthMm) + " " + N(plate.HeightMm) +
             " " + N(plate.ThicknessMm) +
