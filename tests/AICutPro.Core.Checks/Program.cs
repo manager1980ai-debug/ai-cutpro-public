@@ -140,6 +140,39 @@ Assert(repeatedVertexCodes.Shapes.Count == 1 &&
 
 // B1: truncated but syntactically paired DXF can show diagnostic geometry,
 // but must never be treated as complete editable or CAM-ready geometry.
+// B1: EOF is mandatory even when all visible geometry and sections close.
+var missingEof = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","LWPOLYLINE","90","4","70","1",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10",
+    "0","ENDSEC"
+}));
+Assert(missingEof.Shapes.Count == 1 &&
+       missingEof.Warnings.Any(w=>w.Contains("missing its mandatory EOF")),
+       "DXF lacking EOF retains diagnostic geometry but warns about truncation");
+var missingEofPreflight = GeometryPreflight.Inspect(missingEof,new Sheet(100,100));
+Assert(missingEofPreflight.Status == GeometryPreflightStatus.Rejected &&
+       missingEofPreflight.BlockingIssues.Any(x=>x.Contains("missing its mandatory EOF")),
+       "Missing EOF must block geometric preflight");
+bool missingEofExportRejected = false;
+try { PreviewDxfExporter.ValidateDocument(missingEof); }
+catch (FormatException) { missingEofExportRejected = true; }
+Assert(missingEofExportRejected, "Missing EOF must block verified DXF export");
+var completeEof = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","LWPOLYLINE","90","4","70","1",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10",
+    "0","ENDSEC","0","EOF"
+}));
+Assert(completeEof.Shapes.Count == 1 && completeEof.Warnings.Count == 0,
+       "Complete DXF with an explicit EOF remains accepted");
+
 var unclosedSection = DxfReader.Parse(string.Join("\n", new[]
 {
     "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
