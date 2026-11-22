@@ -886,7 +886,7 @@ public partial class MainWindow : Window
                 throw new FormatException("Неверная толщина 3D-модели, мм.");
             if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
                 throw new FormatException("Неверный геометрический допуск DXF.");
-            var model = DxfSynchronized3DExporter.Export(
+            var model = DxfAssembly3DExporter.Export(
                 _dxfPreview,thicknessMm,toleranceMm);
             var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
@@ -913,7 +913,7 @@ public partial class MainWindow : Window
             await writer.FlushAsync();
             StatusText.Text = $"Текущий DXF экспортирован в OpenSCAD: " +
                 $"толщина {model.ThicknessMm:0.###} мм, " +
-                $"отверстий {model.HoleCount}, " +
+                $"материальных областей {model.MaterialRegionCount}, отверстий {model.HoleCount}, " +
                 $"объём {model.VolumeMm3:0.###} мм³. " +
                 "Состояние учитывает Undo/Redo. CAM и резка запрещены.";
         }
