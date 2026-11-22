@@ -683,6 +683,55 @@ public partial class MainWindow : Window
         }
     }
 
+    private void EditCircleHoleClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text, out var toleranceMm))
+                throw new FormatException("Некорректный допуск DXF.");
+            if (!int.TryParse(HoleCircleIndexBox.Text, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var circleNumber) || circleNumber < 1)
+                throw new FormatException("Номер отверстия CIRCLE должен быть положительным.");
+            static bool Coordinate(string? raw, out double value) =>
+                (double.TryParse(raw, NumberStyles.Float, CultureInfo.CurrentCulture, out value) ||
+                 double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) &&
+                double.IsFinite(value);
+            if (!Coordinate(HoleCenterXBox.Text, out var cx) ||
+                !Coordinate(HoleCenterYBox.Text, out var cy) ||
+                !Coordinate(HoleDiameterBox.Text, out var diameter))
+                throw new FormatException("Неверные координаты или диаметр отверстия.");
+            var updated = PreviewCircleHoleEditor.SetHole(
+                _dxfPreview, circleNumber - 1, new PreviewPoint(cx,cy),
+                diameter, toleranceMm);
+            var paths = PreviewDxfExporter.ValidateDocument(updated, toleranceMm);
+            var exported = PreviewDxfExporter.Export(paths, toleranceMm);
+            var reopened = PreviewDxfRoundTripVerifier.Verify(paths, exported, toleranceMm);
+            var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            if (!topology.IsValid)
+                throw new FormatException("DXF с изменённым отверстием не проверен.");
+
+            // Preserve the actual CIRCLE entity for subsequent edits. Mutate the
+            // preview only after all topology and serialization checks succeed.
+            _dxfPreview = updated;
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text = "DXF: редактирование круглого отверстия, только предпросмотр";
+            StatusText.Text = $"Отверстие CIRCLE №{circleNumber}: " +
+                $"центр ({cx:0.###}; {cy:0.###}), Ø{diameter:0.###} мм; " +
+                $"чистая площадь {topology.NetAreaMm2:0.###} мм². " +
+                "CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Изменение отверстия отклонено: " + ex.Message;
+        }
+    }
+
     private async void ExportEditedDxfClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
