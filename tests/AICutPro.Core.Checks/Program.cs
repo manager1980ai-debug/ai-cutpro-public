@@ -1481,4 +1481,47 @@ Assert(RejectAssembly3D(Document(new DxfCircle("CUT",new Point2(0,0),20)),0) &&
        RejectAssembly3D(Document(rectangle,innerHole),double.PositiveInfinity),
        "3D assembly exporter rejects invalid thickness without generating files");
 
+// B2: edit a true circle reconstructed from four DXF ARC segments, not only CIRCLE.
+var circleAsArcsDoc = DxfReader.Parse(PreviewDxfExporter.Export(
+    PreviewDxfExporter.ValidateDocument(Document(rectangle,circleHole))));
+Assert(circleAsArcsDoc.Shapes.All(s=>s is DxfLine or DxfArc) &&
+       circleAsArcsDoc.Shapes.Count(s=>s is DxfArc)==4,
+       "CIRCLE becomes four analytical ARC entities after DXF export");
+var editedArcDiameter = PreviewArcCircleEditor.SetDiameter(circleAsArcsDoc,1,30);
+var editedArcRings = PreviewDxfExporter.ValidateDocument(editedArcDiameter);
+var editedArcTopo = PreviewContourTopology.Analyze(editedArcRings);
+Assert(editedArcTopo.IsValid &&
+       editedArcRings[1].Segments.All(s=>s is PreviewArc a &&
+           Math.Abs(a.RadiusMm-15)<1e-8) &&
+       Math.Abs(editedArcTopo.NetAreaMm2 -
+           (20000-Math.PI*225)) < 1e-6,
+       "Four-ARC circular hole diameter edit changes exact area");
+var arcCircleHistory = new DxfPreviewHistory(circleAsArcsDoc);
+arcCircleHistory.Push(editedArcDiameter);
+Assert(Math.Abs(((PreviewArc)PreviewDxfExporter.ValidateDocument(
+        arcCircleHistory.Undo())[1].Segments[0]).RadiusMm-10)<1e-8 &&
+       Math.Abs(((PreviewArc)PreviewDxfExporter.ValidateDocument(
+        arcCircleHistory.Redo())[1].Segments[0]).RadiusMm-15)<1e-8,
+       "Four-ARC diameter edit can be undone and redone");
+static bool RejectArcCircleDiameter(DxfImportResult doc,int index,double diameter)
+{
+    try{PreviewArcCircleEditor.SetDiameter(doc,index,diameter);return false;}
+    catch(FormatException){return true;}
+}
+Assert(RejectArcCircleDiameter(circleAsArcsDoc,1,0) &&
+       RejectArcCircleDiameter(circleAsArcsDoc,1,double.NaN) &&
+       RejectArcCircleDiameter(circleAsArcsDoc,1,250) &&
+       RejectArcCircleDiameter(circleAsArcsDoc,1,20_000_000) &&
+       RejectArcCircleDiameter(circleAsArcsDoc,99,30) &&
+       RejectArcCircleDiameter(circleAsArcsDoc,0,30),
+       "Four-ARC editor rejects nonfinite/outsize, index and noncircle rings");
+var twoArcHolesDoc = DxfReader.Parse(PreviewDxfExporter.Export(
+    PreviewDxfExporter.ValidateDocument(twoCircleDoc)));
+Assert(RejectArcCircleDiameter(twoArcHolesDoc,1,110),
+       "Four-ARC editing rejects circle collisions with the other hole");
+var editedArcScad = DxfAssembly3DExporter.Export(editedArcDiameter,5);
+Assert(editedArcScad.OpenScad.Contains("r = 15") &&
+       Math.Abs(editedArcScad.VolumeMm3-(20000-Math.PI*225)*5)<1e-6,
+       "Four-ARC changed geometry reaches synchronized 3D assembly");
+
 Console.WriteLine("AI CutPro core checks passed.");
