@@ -19,3 +19,14 @@ jobs:
       - run: dotnet restore src/AICutPro.App/AICutPro.App.csproj
       - run: dotnet build src/AICutPro.App/AICutPro.App.csproj --configuration Release --no-restore
       - run: dotnet run --project tests/AICutPro.Core.Checks/AICutPro.Core.Checks.csproj --configuration Release
+      - name: Publish Windows preview (self-contained, no machine control)
+        if: matrix.os == 'windows-latest'
+        run: dotnet publish src/AICutPro.App/AICutPro.App.csproj --configuration Release --runtime win-x64 --self-contained true --output dist/AI-CutPro-Windows-Preview -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false
+      - name: Upload Windows preview executable
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-CutPro-Windows-Preview
+          path: dist/AI-CutPro-Windows-Preview/
+          if-no-files-found: error
+          retention-days: 14
