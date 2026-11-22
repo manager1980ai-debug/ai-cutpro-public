@@ -11,6 +11,41 @@ import time
 from pywinauto import Desktop
 
 
+
+def probe_tab_navigation(window):
+    """Exercise a real UIA button and observe the resulting status content."""
+    def ui_text():
+        return [x.window_text() for x in window.descendants(control_type="Text")]
+
+    def button_named(label):
+        matches = [b for b in window.descendants(control_type="Button")
+                   if b.window_text() == label]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Expected one visible GUI button {label!r}, got {len(matches)}")
+        return matches[0]
+
+    def invoke(button):
+        # UIA InvokePattern works for Avalonia controls without depending on
+        # scroll positions or simulated screen coordinates.
+        button.iface_invoke.Invoke()
+
+    def assert_status(fragment):
+        for _ in range(15):
+            if any(fragment in text for text in ui_text()):
+                return
+            time.sleep(0.3)
+        raise RuntimeError(
+            f"GUI did not update text after interaction: {fragment!r}")
+
+    invoke(button_named("История"))
+    assert_status("Раздел «История»")
+    assert_status("История")
+    invoke(button_named("Раскрой"))
+    assert_status("Рабочий прототип раскроя")
+    print("GUI interaction PASS: History -> Layout tabs and live status changes")
+
+
 def main() -> None:
     # GitHub-hosted Windows consoles can default to a legacy codepage; the
     # Russian title is valid UI data and must not make logging fail.
@@ -51,6 +86,7 @@ def main() -> None:
                     if capture.width < 900 or capture.height < 600:
                         raise RuntimeError("Captured GUI dimensions are too small")
                     capture.save(screenshot)
+                    probe_tab_navigation(window)
                     print(
                         f"GUI smoke passed: title={window.window_text()!r}, "
                         f"pid={process.pid}, handle={window.handle}, "
