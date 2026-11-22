@@ -138,6 +138,28 @@ Assert(repeatedVertexCodes.Shapes.Count == 1 &&
        "Ordinary repeated DXF polyline vertex coordinate groups remain supported");
 
 
+// B1: truncated but syntactically paired DXF can show diagnostic geometry,
+// but must never be treated as complete editable or CAM-ready geometry.
+var unclosedSection = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","LWPOLYLINE","90","4","70","1",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10"
+}));
+Assert(unclosedSection.Shapes.Count == 1 &&
+       unclosedSection.Warnings.Any(w=>w.Contains("unterminated or malformed SECTION")),
+       "Truncated ENTITIES section remains diagnostic-only with a blocking warning");
+Assert(!GeometryPreflight.Inspect(unclosedSection,new Sheet(100,100))
+           .CanGenerateMachineCommands,
+       "Unclosed DXF never generates machine commands");
+bool unclosedExportBlocked=false;
+try { PreviewDxfExporter.ValidateDocument(unclosedSection); }
+catch (FormatException) {unclosedExportBlocked=true;}
+Assert(unclosedExportBlocked,
+       "Incomplete DXF cannot be saved as a verified edited drawing");
+
 var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
 Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
 var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
