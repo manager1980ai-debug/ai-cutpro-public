@@ -98,7 +98,9 @@ public sealed class DxfDiagnosticsWindow : Window
         var help = finding.Help;
         _details.Text =
             $"Код: {help.Code}\n" +
-            $"Проблема: {help.TitleRu}\n\n" +
+            $"Проблема: {help.TitleRu}\n" +
+            (finding.Layer is null ? "Слой: не установлен\n" : $"Слой: {finding.Layer}\n") +
+            "Координаты проблемы: не определены\n\n" +
             $"Что произошло: {help.ExplanationRu}\n\n" +
             $"Как исправить: {help.AdviceRu}\n\n" +
             $"Автоматическое исправление: {(help.RepairAvailable ? "доступно" : "пока недоступно")}\n\n" +
