@@ -2503,4 +2503,50 @@ Assert(chamferRings[0].Segments.Count==4 &&
                 chamferOriginal.NetAreaMm2)<1e-6,
        "Chamfer does not mutate original preview: Undo history can retain it");
 
+// Stage 2 B2: exact tangent ARC fillet at the (0,0) convex corner of a
+// 100x80 plate with a circular hole. 10mm fillet reduces material area by
+// R^2*(1 - pi/4) and must preserve the complete inner hole.
+var filletSource=Document(
+    Closed("FILLET_PLATE",new Point2(0,0),new Point2(100,0),
+        new Point2(100,80),new Point2(0,80)),
+    new DxfCircle("FILLET_HOLE",new Point2(50,40),10));
+var filletRings=PreviewDxfExporter.ValidateDocument(filletSource);
+var filletBefore=PreviewContourTopology.Analyze(filletRings);
+var filleted=PreviewCornerFilletEditor.FilletVertex(filletRings,0,0,10);
+var filletAfter=PreviewContourTopology.Analyze(filleted.Rings);
+var filletArcs=filleted.Rings[0].Segments.OfType<PreviewArc>().ToArray();
+Assert(filleted.IsValidForPreview && !filleted.CanStartMachine &&
+       filletAfter.IsValid && filletAfter.Rings.Count==2 &&
+       filleted.Rings[0].Segments.Count==5 &&
+       filletArcs.Length==1 &&
+       Math.Abs(filletArcs[0].RadiusMm-10)<1e-7 &&
+       Math.Abs(filletArcs[0].Center.X-10)<1e-7 &&
+       Math.Abs(filletArcs[0].Center.Y-10)<1e-7 &&
+       Math.Abs(filletArcs[0].SweepDegrees-90)<1e-7 &&
+       Math.Abs(filletAfter.NetAreaMm2-
+           (filletBefore.NetAreaMm2-100*(1-Math.PI/4)))<1e-5 &&
+       filleted.Rings[1].Segments.Count==filletRings[1].Segments.Count,
+       "Fillet builds true tangent quarter-circle, analytically changes area and keeps hole");
+var filletDxf=PreviewDxfExporter.Export(filleted.Rings);
+var filletReopened=PreviewDxfRoundTripVerifier.Verify(filleted.Rings,filletDxf);
+Assert(PreviewContourTopology.Analyze(filletReopened).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(filletReopened).NetAreaMm2-
+                filletAfter.NetAreaMm2)<1e-5,
+       "Fillet retains exact analytic ARC and holes across DXF export and reimport");
+foreach(var r in new[]{double.NaN,double.PositiveInfinity,-1d,0d,0.001d,80d,100d})
+{
+    bool rejected=false;
+    try { PreviewCornerFilletEditor.FilletVertex(filletRings,0,0,r); }
+    catch(FormatException) { rejected=true; }
+    Assert(rejected,"Nonfinite or non-fitting fillet radius must fail closed");
+}
+bool filletOnCircleRejected=false;
+try { PreviewCornerFilletEditor.FilletVertex(filletRings,1,0,10); }
+catch(FormatException) { filletOnCircleRejected=true; }
+Assert(filletOnCircleRejected,"Fillet refuses ARC rings rather than flattening curves");
+Assert(filletRings[0].Segments.Count==4 &&
+       Math.Abs(PreviewContourTopology.Analyze(filletRings).NetAreaMm2-
+                filletBefore.NetAreaMm2)<1e-6,
+       "Fillet leaves source DXF unchanged for Undo and failed operations");
+
 Console.WriteLine("AI CutPro core checks passed.");
