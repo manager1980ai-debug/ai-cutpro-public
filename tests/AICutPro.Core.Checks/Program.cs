@@ -3208,12 +3208,27 @@ var externalDxfDirectory=Environment.GetEnvironmentVariable("AI_CUTPRO_CI_DXF_DI
 if(!string.IsNullOrWhiteSpace(externalDxfDirectory))
 {
     Directory.CreateDirectory(externalDxfDirectory);
+    // Independent GEOS test: two disjoint plates, four nested material/void
+    // levels in the first and a separate hole in the second. All boundaries
+    // are simple LINE rectangles with a known elementary area oracle.
+    var geosNestedDrawing=new PreviewPath[]
+    {
+        PreviewSquare(0,0,100,100),
+        PreviewSquare(20,20,80,80),
+        PreviewSquare(35,35,65,65),
+        PreviewSquare(45,45,55,55),
+        PreviewSquare(150,0,210,60),
+        PreviewSquare(170,20,190,40)
+    };
+    Assert(PreviewGeometryTolerancePolicy.Create().ValidateDrawing(geosNestedDrawing).IsValid,
+           "GEOS external multi-part nested fixture passes core preview");
     var externalSamples=new (string Name,IReadOnlyList<PreviewPath> Rings)[]
     {
         ("line_arc_tangent",tangentFillet.Rings),
         ("arc_arc_tangent",arcArcResult.Rings),
         ("two_pinned_lengths",dualAlternative.Rings),
-        ("constrained_rectangle_with_hole",propagatedWithHole.Rings)
+        ("constrained_rectangle_with_hole",propagatedWithHole.Rings),
+        ("two_parts_nested_island",geosNestedDrawing)
     };
     var manifest=new List<object>();
     foreach(var sample in externalSamples)
@@ -3232,8 +3247,10 @@ if(!string.IsNullOrWhiteSpace(externalDxfDirectory))
             perimeter=sample.Rings.Sum(r=>PreviewContourMetrics.Measure(r).PerimeterMm),
             // This fixture has one outer rectangle and one verified circular hole.
             // The external parser must independently recover that nesting.
-            expected_rings=sample.Name=="constrained_rectangle_with_hole" ? (int?)2 : null,
-            expected_holes=sample.Name=="constrained_rectangle_with_hole" ? (int?)1 : null
+            expected_rings=sample.Name=="constrained_rectangle_with_hole" ? (int?)2 :
+                           sample.Name=="two_parts_nested_island" ? (int?)6 : null,
+            expected_holes=sample.Name=="constrained_rectangle_with_hole" ? (int?)1 :
+                           sample.Name=="two_parts_nested_island" ? (int?)3 : null
         });
     }
     File.WriteAllText(Path.Combine(externalDxfDirectory,"manifest.json"),
