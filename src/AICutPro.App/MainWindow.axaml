@@ -63,6 +63,10 @@
           <TextBlock Text="Абсолютный угол прямого ребра относительно +X, °" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditEdgeAngleBox" Text="0" Watermark="Угол, градусы (-360…360)"/>
           <Button Content="Задать угол ребра (предпросмотр)" Click="SetDxfEdgeAngleClicked"/>
+          <TextBlock Text="Радиус выбранной дуги ARC, мм (концы дуги закреплены)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <TextBox x:Name="EditArcRadiusBox" Text="12" Watermark="Новый радиус, мм"/>
+          <Button Content="Изменить радиус дуги (предпросмотр)" Click="EditSingleArcRadiusClicked"/>
+          <TextBlock Text="Выберите номер контура и сегмента (1-based). Начальная и конечная точки дуги остаются неподвижны; форма контура проверяется." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Угол отсчитывается против часовой стрелки от +X. Начало и длина выбранного ребра сохраняются; меняется его конечная вершина." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Начало прямого ребра остаётся на месте; конец смещается по его направлению. Проверяются все отверстия и пересечения." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Вставка: номер вершины обозначает начало прямого ребра, X/Y задают точку на ребре. Удаление: X/Y не используются. Нумерация начинается с 1." Foreground="#9CB3C9" TextWrapping="Wrap"/>
