@@ -69,7 +69,7 @@
           <TextBox x:Name="EditVertexIndexBox" Text="1" Watermark="Номер вершины"/>
           <TextBox x:Name="EditVertexXBox" Text="0" Watermark="Новый X, мм"/>
           <TextBox x:Name="EditVertexYBox" Text="0" Watermark="Новый Y, мм"/>
-          <Button Content="Переместить вершину (предпросмотр)" Click="EditDxfVertexClicked"/>
+          <Button Content="Переместить вершину с учётом ограничений" Click="EditDxfVertexClicked"/>
           <Button Content="Вставить вершину на ребро (предпросмотр)" Click="InsertDxfVertexClicked"/>
           <Button Content="Удалить вершину (предпросмотр)" Click="DeleteDxfVertexClicked"/>
           <TextBlock Text="Фаска прямолинейного угла (отступ по обоим рёбрам, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
@@ -104,6 +104,7 @@
             <ComboBoxItem Content="Вертикально"/>
           </ComboBox>
           <Button Content="Закрепить ограничение направления" Click="PinAxisConstraintClicked"/>
+          <TextBlock Text="При перемещении вершины закреплённые соседние рёбра автоматически удерживают координату по X или Y. Остальные вершины не перемещаются." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Снять выбранное ограничение" Click="UnpinAxisConstraintClicked"/>
           <TextBlock Text="Сначала выровняйте ребро. Закрепление хранится с Undo/Redo; несовместимое изменение отклоняется, а не пересчитывается молча. Открытие нового DXF сбрасывает ограничения." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Однократная фиксация направления: начальная вершина и длина ребра сохраняются. Номер ребра выше; только LINE-контуры. Это пока не постоянная параметрическая зависимость." Foreground="#9CB3C9" TextWrapping="Wrap"/>
