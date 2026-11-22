@@ -59,11 +59,29 @@ public static class PreviewRigidTransformEditor
             a => (-a.StartDegrees,-a.SweepDegrees), toleranceMm);
     }
 
+    /// <summary>
+    /// Uniformly resize all verified rings about a fixed point. Analytic ARC
+    /// radii scale exactly; holes retain parent ownership. Preview-only.
+    /// </summary>
+    public static PreviewVertexEditResult ScaleUniform(
+        IReadOnlyList<PreviewPath> rings, PreviewPoint pivot,
+        double factor, double toleranceMm = 0.01)
+    {
+        CheckPoint(pivot);
+        if (!double.IsFinite(factor) || factor < 0.01 || factor > 100)
+            throw new FormatException("Uniform scale factor must be within 0.01..100.");
+        return Apply(rings,
+            p => new(pivot.X+(p.X-pivot.X)*factor,
+                     pivot.Y+(p.Y-pivot.Y)*factor),
+            a => (a.StartDegrees,a.SweepDegrees), toleranceMm,
+            radiusScale:factor, areaScale:factor*factor);
+    }
+
     private static PreviewVertexEditResult Apply(
         IReadOnlyList<PreviewPath> rings,
         Func<PreviewPoint,PreviewPoint> point,
         Func<PreviewArc,(double Start,double Sweep)> arcAngles,
-        double toleranceMm)
+        double toleranceMm, double radiusScale = 1, double areaScale = 1)
     {
         ArgumentNullException.ThrowIfNull(rings);
         if (!double.IsFinite(toleranceMm) || toleranceMm < 0.0001 || toleranceMm > 1)
@@ -92,7 +110,7 @@ public static class PreviewRigidTransformEditor
                     var angles=arcAngles(arc);
                     if(!double.IsFinite(angles.Start)||!double.IsFinite(angles.Sweep))
                         throw new FormatException("Transformed ARC angle is invalid.");
-                    segments.Add(new PreviewArc(center,arc.RadiusMm,
+                    segments.Add(new PreviewArc(center,arc.RadiusMm*radiusScale,
                         angles.Start,angles.Sweep));
                 }
                 else throw new FormatException("Unsupported transformed segment.");
@@ -108,8 +126,9 @@ public static class PreviewRigidTransformEditor
                before.Rings[i].IsMaterialBoundary!=after.Rings[i].IsMaterialBoundary)
                 throw new FormatException("Rigid transform changed hole/island ownership.");
         var areaTolerance=Math.Max(1e-5,Math.Abs(before.NetAreaMm2)*1e-9);
-        if(Math.Abs(after.NetAreaMm2-before.NetAreaMm2)>areaTolerance)
-            throw new FormatException("Rigid transform changed net area.");
+        if(Math.Abs(after.NetAreaMm2-before.NetAreaMm2*areaScale)>
+           Math.Max(areaTolerance*areaScale,1e-6))
+            throw new FormatException("Transform produced unexpected net area.");
         var dxf = PreviewDxfExporter.Export(transformed,toleranceMm);
         PreviewDxfRoundTripVerifier.Verify(transformed,dxf,toleranceMm);
         return new(transformed,after.NetAreaMm2,true);
