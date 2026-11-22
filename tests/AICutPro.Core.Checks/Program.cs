@@ -2188,6 +2188,54 @@ Assert(rigidMirrored.IsValidForPreview && mirrorTopo.IsValid &&
 PreviewDxfRoundTripVerifier.Verify(rigidMirrored.Rings,
     PreviewDxfExporter.Export(rigidMirrored.Rings));
 
+// B2: uniform scaling of a plate with circular hole preserves precise
+// ARC curvature and hole ownership, changing net area by factor squared.
+var scaledDxf=PreviewRigidTransformEditor.ScaleUniform(
+    rigidPaths,new PreviewPoint(100,100),2);
+var scaledTopology=PreviewContourTopology.Analyze(scaledDxf.Rings);
+Assert(scaledDxf.IsValidForPreview && !scaledDxf.CanStartMachine &&
+       scaledTopology.IsValid && scaledTopology.Rings.Count==2 &&
+       Math.Abs(scaledTopology.NetAreaMm2-rigidArea*4)<1e-5 &&
+       scaledDxf.Rings.SelectMany(p=>p.Segments).OfType<PreviewArc>()
+           .Any(a=>Math.Abs(a.Center.X-100)<1e-7 &&
+                   Math.Abs(a.Center.Y-100)<1e-7 &&
+                   Math.Abs(a.RadiusMm-60)<1e-7),
+       "Uniform DXF scaling doubles hole radius and quadruples net area");
+var restoredScale=PreviewRigidTransformEditor.ScaleUniform(
+    scaledDxf.Rings,new PreviewPoint(100,100),0.5);
+var scaleRoundTrip=PreviewDxfRoundTripVerifier.Verify(
+    restoredScale.Rings,PreviewDxfExporter.Export(restoredScale.Rings));
+var restoredScaleTopology=PreviewContourTopology.Analyze(scaleRoundTrip);
+Assert(restoredScaleTopology.IsValid &&
+       scaleRoundTrip.Count==rigidPaths.Count &&
+       Math.Abs(restoredScaleTopology.NetAreaMm2-rigidArea)<1e-6 &&
+       scaleRoundTrip.SelectMany(p=>p.Segments).OfType<PreviewArc>()
+           .Any(a=>Math.Abs(a.RadiusMm-30)<1e-7),
+       "Inverse uniform scaling restores analytic hole radius and DXF topology");
+foreach(var invalidFactor in new[]{
+    double.NaN,double.PositiveInfinity,0,-1,0.001,101
+})
+{
+    bool invalidScaleRejected=false;
+    try
+    {
+        PreviewRigidTransformEditor.ScaleUniform(
+            rigidPaths,new PreviewPoint(100,100),invalidFactor);
+    }
+    catch(FormatException) { invalidScaleRejected=true; }
+    Assert(invalidScaleRejected,
+           "Invalid uniform scale factor must fail closed");
+}
+bool invalidScalePivotRejected=false;
+try
+{
+    PreviewRigidTransformEditor.ScaleUniform(
+        rigidPaths,new PreviewPoint(double.NaN,0),2);
+}
+catch(FormatException) { invalidScalePivotRejected=true; }
+Assert(invalidScalePivotRejected,
+       "Nonfinite uniform scale pivot must fail closed");
+
 // B2: horizontal reflection around arbitrary Y must preserve exact arcs,
 // circular-hole ownership and net area. Two reflections are an identity.
 var horizontalMirrored=PreviewRigidTransformEditor.MirrorHorizontal(rigidPaths,125);
