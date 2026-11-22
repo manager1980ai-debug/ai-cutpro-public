@@ -11,6 +11,63 @@ public static class PreviewLineArcFilletEditor
     private static double Distance(PreviewPoint a,PreviewPoint b)=>
         Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Y-b.Y)*(a.Y-b.Y));
 
+    /// <summary>
+    /// Exact incoming ARC -> outgoing LINE fillet. Reverse only the selected
+    /// closed ring, reuse the already validated LINE -> ARC analytic solver,
+    /// then restore original winding. Existing ARC radii are not approximated.
+    /// Segment index selects the outgoing LINE, not the incoming ARC.
+    /// </summary>
+    public static PreviewVertexEditResult FilletOutgoingLine(
+        IReadOnlyList<PreviewPath> rings,int ringIndex,int lineSegmentIndex,
+        double radiusMm,double toleranceMm=0.01)
+    {
+        ArgumentNullException.ThrowIfNull(rings);
+        if(rings.Count is <1 or >1000 || ringIndex<0||ringIndex>=rings.Count)
+            throw new FormatException("Invalid ARC/LINE ring index.");
+        var original=rings[ringIndex];
+        var n=original.Segments.Count;
+        if(!original.Closed||n is <3 or >1999||
+           lineSegmentIndex<0||lineSegmentIndex>=n)
+            throw new FormatException("Invalid ARC/LINE segment selection.");
+        var arcIndex=(lineSegmentIndex+n-1)%n;
+        if(original.Segments[arcIndex] is not PreviewArc ||
+           original.Segments[lineSegmentIndex] is not PreviewLine)
+            throw new FormatException("Select a LINE immediately after an ARC.");
+        var reversed=rings.ToArray();
+        reversed[ringIndex]=ReverseRing(original);
+        var reversedArcIndex=(n-lineSegmentIndex)%n;
+        var solved=FilletIncomingLine(
+            reversed,ringIndex,reversedArcIndex,radiusMm,toleranceMm);
+        var restored=solved.Rings.ToArray();
+        restored[ringIndex]=ReverseRing(restored[ringIndex]);
+        var before=PreviewContourTopology.Analyze(rings,toleranceMm);
+        var after=PreviewContourTopology.Analyze(restored,toleranceMm);
+        if(!before.IsValid||!after.IsValid||before.Rings.Count!=after.Rings.Count)
+            throw new FormatException("ARC/LINE fillet failed topology validation.");
+        for(int i=0;i<before.Rings.Count;i++)
+            if(before.Rings[i].ParentIndex!=after.Rings[i].ParentIndex||
+               before.Rings[i].Depth!=after.Rings[i].Depth||
+               before.Rings[i].IsMaterialBoundary!=after.Rings[i].IsMaterialBoundary)
+                throw new FormatException("ARC/LINE fillet changed hole or island ownership.");
+        PreviewDxfRoundTripVerifier.Verify(
+            restored,PreviewDxfExporter.Export(restored,toleranceMm),toleranceMm);
+        return new(restored,after.NetAreaMm2,true);
+    }
+
+    private static PreviewPath ReverseRing(PreviewPath ring)
+    {
+        var segments=new List<PreviewSegment>(ring.Segments.Count);
+        for(int i=ring.Segments.Count-1;i>=0;i--)
+            segments.Add(ring.Segments[i] switch
+            {
+                PreviewLine line=>new PreviewLine(line.End,line.Start),
+                PreviewArc arc=>new PreviewArc(arc.Center,arc.RadiusMm,
+                    arc.StartDegrees+arc.SweepDegrees,-arc.SweepDegrees),
+                _=>throw new FormatException("Unsupported ARC/LINE segment.")
+            });
+        return new PreviewPath(segments,ring.Closed);
+    }
+
     public static PreviewVertexEditResult FilletIncomingLine(
         IReadOnlyList<PreviewPath> rings,int ringIndex,int arcSegmentIndex,
         double radiusMm,double toleranceMm=0.01)
