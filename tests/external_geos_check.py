@@ -63,8 +63,8 @@ def check_geos_oracle(folder):
         raise AssertionError("Hole interior overlaps material polygon")
     # Oracle sourced from the explicit fixture geometry, not AI CutPro's
     # manifest perimeter or the product's topology/area calculations.
-    # The final contour is the rectangle [0,110] x [0,100], with R10 hole.
-    expected_area = 110.0 * 100.0 - math.pi * 10.0**2
+    # The final contour is the rectangle [0,110] x [10,100], with R10 hole.
+    expected_area = 110.0 * 90.0 - math.pi * 10.0**2
     if abs(material.area - expected_area) > 0.03:
         raise AssertionError(
             f"GEOS net area {material.area:.6f} vs independent analytic "
