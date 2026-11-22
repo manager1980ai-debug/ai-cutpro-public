@@ -294,6 +294,36 @@ catch (FormatException) { duplicateEntitiesExportRejected = true; }
 Assert(duplicateEntitiesExportRejected,
        "Multiple ENTITIES sections must fail verified geometry export");
 
+// B1: a single LWPOLYLINE vertex must never contain two bulge values.
+// Selecting the last value silently alters the curvature and material area.
+var duplicatedVertexBulge = DxfReader.Parse(SafeEntityDxf(
+    "0","LWPOLYLINE","90","3","70","1",
+    "10","0","20","0","42","0.2","42","0.5",
+    "10","100","20","0","10","50","20","100"));
+Assert(duplicatedVertexBulge.Shapes.Count == 0 &&
+       duplicatedVertexBulge.Warnings.Any(w=>w.Contains("Duplicate LWPOLYLINE vertex bulge")),
+       "Two bulge values on one DXF vertex must reject the entire ambiguous polyline");
+var repeatedVertexBulges = DxfReader.Parse(SafeEntityDxf(
+    "0","LWPOLYLINE","90","3","70","1",
+    "10","0","20","0","42","0.2",
+    "10","100","20","0","42","0.3",
+    "10","50","20","100","42","0"));
+Assert(repeatedVertexBulges.Shapes.Count==1 &&
+       repeatedVertexBulges.Shapes[0] is DxfBulgedPolyline &&
+       repeatedVertexBulges.Warnings.Count==1 &&
+       repeatedVertexBulges.Warnings[0].Contains("preview-only"),
+       "Separate per-vertex bulges remain valid and preview-only");
+var duplicatedBulgePreflight = GeometryPreflight.Inspect(
+    duplicatedVertexBulge,new Sheet(200,200));
+Assert(duplicatedBulgePreflight.Status==GeometryPreflightStatus.Rejected &&
+       duplicatedBulgePreflight.BlockingIssues.Any(x=>x.Contains("Duplicate LWPOLYLINE vertex bulge")),
+       "Ambiguous bulge geometry cannot pass manufacturing preflight");
+bool duplicatedBulgeExportBlocked = false;
+try { PreviewDxfExporter.ValidateDocument(duplicatedVertexBulge); }
+catch (FormatException) { duplicatedBulgeExportBlocked = true; }
+Assert(duplicatedBulgeExportBlocked,
+       "Ambiguous per-vertex curvature must block verified DXF export");
+
 var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
 Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
 var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
