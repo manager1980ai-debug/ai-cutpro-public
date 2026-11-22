@@ -52,6 +52,26 @@ def probe_tab_navigation(window):
     invoke(button_named("Отменить изменение"))
     assert_status("Нет изменений DXF для отмены.")
     print("GUI undo PASS: empty edit history rejected with a visible message")
+    invoke(button_named("Диагностика DXF (все замечания)"))
+    diagnostic_window = None
+    for _ in range(20):
+        candidates = [w for w in Desktop(backend="uia").windows()
+                      if w.process_id() == window.process_id()
+                      and "Диагностика DXF" in w.window_text()]
+        if candidates:
+            diagnostic_window = candidates[0]
+            break
+        time.sleep(0.3)
+    if diagnostic_window is None or not diagnostic_window.is_visible():
+        raise RuntimeError("DXF diagnostics window did not open")
+    details = [x.window_text() for x in
+               diagnostic_window.descendants(control_type="Text")]
+    if not any("нет диагностических записей" in t.lower() or
+               "Пока нет диагностических записей" in t for t in details):
+        raise RuntimeError("Empty diagnostics window has no explanatory guidance")
+    diagnostic_window.close()
+    print("GUI diagnostic panel PASS: opened separate offline report and empty-state guidance")
+
 
 
 def main() -> None:
