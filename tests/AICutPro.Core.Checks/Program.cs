@@ -2236,4 +2236,76 @@ Assert(zeroPierce.Completed &&
        !zeroPierce.CanStartMachine,
        "Zero virtual delay is represented without enabling machinery");
 
+// Stage 3 multi-contour virtual pierce rehearsal: all episodes have their
+// own local virtual time. No actual cutting time, travel, G-code or tool IO.
+var multiPierceAttempts = new[]
+{
+    new PlasmaPierceBatchSimulator.Attempt("INNER-HOLE-1",
+        new PlasmaPierceSimulator.Inputs(ArcOkAtSeconds:0.1)),
+    new PlasmaPierceBatchSimulator.Attempt("INNER-HOLE-2",
+        new PlasmaPierceSimulator.Inputs(ArcOkAtSeconds:0.2)),
+    new PlasmaPierceBatchSimulator.Attempt("OUTER-BOUNDARY",
+        new PlasmaPierceSimulator.Inputs(ArcOkAtSeconds:0.3))
+};
+var multiPiercePass = PlasmaPierceBatchSimulator.Rehearse(
+    syntheticPlasmaProfile,multiPierceAttempts);
+Assert(multiPiercePass.Completed && multiPiercePass.Failure is null &&
+       multiPiercePass.Outcomes.Count==3 &&
+       multiPiercePass.Outcomes.Select(x=>x.ContourId).SequenceEqual(
+           new[]{"INNER-HOLE-1","INNER-HOLE-2","OUTER-BOUNDARY"}) &&
+       multiPiercePass.Outcomes.All(x=>x.Result.Completed) &&
+       !multiPiercePass.CanStartMachine &&
+       !multiPiercePass.ProducesGCode &&
+       !multiPiercePass.AllowsAutomaticResume,
+       "Three ordered pierce rehearsals complete as separate virtual episodes only");
+var multiPierceFailure = PlasmaPierceBatchSimulator.Rehearse(
+    syntheticPlasmaProfile,
+    new[]{
+        multiPierceAttempts[0],
+        new PlasmaPierceBatchSimulator.Attempt("INNER-HOLE-2",
+            new PlasmaPierceSimulator.Inputs(double.PositiveInfinity)),
+        multiPierceAttempts[2]
+    });
+Assert(!multiPierceFailure.Completed &&
+       multiPierceFailure.Outcomes.Count==2 &&
+       multiPierceFailure.Outcomes[0].Result.Completed &&
+       !multiPierceFailure.Outcomes[1].Result.Completed &&
+       multiPierceFailure.Failure!.Contains("INNER-HOLE-2") &&
+       !multiPierceFailure.Outcomes.Any(x=>x.ContourId=="OUTER-BOUNDARY") &&
+       !multiPierceFailure.AllowsAutomaticResume,
+       "Second-contour arc timeout halts the whole virtual job before exterior");
+var multiPierceLostArc = PlasmaPierceBatchSimulator.Rehearse(
+    syntheticPlasmaProfile,
+    new[]{
+        multiPierceAttempts[0],
+        new PlasmaPierceBatchSimulator.Attempt("INNER-HOLE-2",
+            new PlasmaPierceSimulator.Inputs(0.1,ArcLostAtSeconds:0.4)),
+        multiPierceAttempts[2]
+    });
+Assert(!multiPierceLostArc.Completed &&
+       multiPierceLostArc.Outcomes.Count==2 &&
+       multiPierceLostArc.Failure!.Contains("lost during pierce delay"),
+       "Arc loss during second pierce forbids continuing the virtual sequence");
+var multiPierceDuplicate = PlasmaPierceBatchSimulator.Rehearse(
+    syntheticPlasmaProfile,
+    new[]{multiPierceAttempts[0],multiPierceAttempts[0]});
+Assert(!multiPierceDuplicate.Completed &&
+       multiPierceDuplicate.Outcomes.Count==0 &&
+       multiPierceDuplicate.Failure!.Contains("Duplicate"),
+       "Duplicate contour names are rejected before simulation begins");
+Assert(!PlasmaPierceBatchSimulator.Rehearse(
+           syntheticPlasmaProfile,
+           Array.Empty<PlasmaPierceBatchSimulator.Attempt>()).Completed &&
+       !PlasmaPierceBatchSimulator.Rehearse(
+           syntheticPlasmaProfile,
+           Enumerable.Range(0,101).Select(i=>new PlasmaPierceBatchSimulator.Attempt(
+               $"PART-{i}",new PlasmaPierceSimulator.Inputs(0.1))).ToArray()).Completed,
+       "Virtual job rejects empty and unbounded pierce attempt counts");
+var multiPierceInvalidProfile=PlasmaPierceBatchSimulator.Rehearse(
+    syntheticPlasmaProfile with {OperatorConfirmed=false},multiPierceAttempts);
+Assert(!multiPierceInvalidProfile.Completed &&
+       multiPierceInvalidProfile.Outcomes.Count==1 &&
+       !multiPierceInvalidProfile.AllowsAutomaticResume,
+       "Unconfirmed process profile cannot advance to subsequent contour attempts");
+
 Console.WriteLine("AI CutPro core checks passed.");
