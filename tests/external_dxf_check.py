@@ -316,7 +316,10 @@ def check_ring_nesting(entities, expected_rings=None, expected_holes=None,
         current = start
         ring = []
         for _ in range(len(entities)+1):
-            choices = sorted(e for e in adjacency[current] if e in unused)
+            # At the starting vertex either incident edge is a valid
+            # direction. Afterwards the continuation is unambiguous.
+            choices = ([first] if not ring else
+                       sorted(e for e in adjacency[current] if e in unused))
             if len(choices)!=1:
                 raise AssertionError("Ambiguous ring traversal")
             edge_id = choices[0]
