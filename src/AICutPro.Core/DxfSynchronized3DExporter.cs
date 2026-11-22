@@ -5,8 +5,8 @@ namespace AICutPro.Core;
 
 /// <summary>
 /// Produces a 3D OpenSCAD extrusion from the CURRENT, verified DXF preview.
-/// Supported subset: one straight-edged exterior and any number of DXF CIRCLE
-/// through-holes. Unsupported arcs, material islands and multiple parts are
+/// Supported subset: one straight-edged exterior with straight-edged polygonal
+/// or truly circular through-holes. Unsupported arcs, material islands and multiple parts are
 /// rejected rather than silently omitted. No CAM or machine authorization.
 /// </summary>
 public sealed record Synchronized3DPreview(
@@ -41,36 +41,35 @@ public static class DxfSynchronized3DExporter
         if (exterior.Length != 1 ||
             topology.Rings.Any(r => r.Depth > 1 || (r.Depth == 1 &&
                 r.ParentIndex != exterior[0].Index)))
-            throw new FormatException("3D extrusion supports one part with direct circular holes.");
+            throw new FormatException("3D extrusion supports one part with direct holes.");
 
         var outline = rings[exterior[0].Index];
         if (!outline.Closed || outline.Segments.Count is < 3 or > 2000 ||
             outline.Segments.Any(s => s is not PreviewLine))
             throw new FormatException("Outer 3D profile must consist of straight edges.");
-        var vertices = outline.Segments.Cast<PreviewLine>()
-            .Select(s => s.Start).ToArray();
         var epsilon = Math.Max(1e-8,toleranceMm*1e-4);
-        for(int i=0;i<vertices.Length;i++)
-        {
-            var next = (PreviewLine)outline.Segments[i];
-            var following = vertices[(i+1)%vertices.Length];
-            if (Distance(next.End,following) > epsilon)
-                throw new FormatException("Outer DXF vertices are not connected exactly.");
-        }
+        var vertices = ExtractVertices(outline,epsilon);
 
-        // CIRCLE is represented by four exact analytic quarter arcs. Editing
-        // the exterior can reserialize those arcs as ARC entities, so recognize
-        // them by strict geometry rather than depending on their DXF entity type.
-        // Other curved holes are refused, never flattened or silently omitted.
-        var holes = new List<(PreviewPoint Center,double Radius)>();
+        // The source contour must remain analytical. Polygonal holes are
+        // exported as exact straight boundaries; circles retain exact centers
+        // and radii. Unsupported mixed/partial arcs are rejected.
+        var roundHoles = new List<(PreviewPoint Center,double Radius)>();
+        var polygonHoles = new List<PreviewPoint[]>();
         foreach (var info in topology.Rings.Where(r=>r.Depth==1))
         {
-            var circle = RecognizeCircle(rings[info.Index],epsilon);
+            var hole = rings[info.Index];
+            if (hole.Closed && hole.Segments.Count is >= 3 and <= 2000 &&
+                hole.Segments.All(segment => segment is PreviewLine))
+            {
+                polygonHoles.Add(ExtractVertices(hole,epsilon));
+                continue;
+            }
+            var circle = RecognizeCircle(hole,epsilon);
             if(circle is null)
-                throw new FormatException("3D extrusion requires truly circular through-holes.");
-            holes.Add(circle.Value);
+                throw new FormatException("Unsupported curved or mixed 3D through-hole.");
+            roundHoles.Add(circle.Value);
         }
-        if(holes.Count > 200)
+        if(roundHoles.Count+polygonHoles.Count > 200)
             throw new FormatException("Too many 3D through-holes.");
 
         var roundTrip = PreviewDxfExporter.Export(rings,toleranceMm);
@@ -95,10 +94,10 @@ public static class DxfSynchronized3DExporter
         }
         scad.AppendLine("]);");
         scad.AppendLine("  }");
-        foreach(var circle in holes)
+        // The cutters overlap both faces to prevent coplanar CSG artifacts.
+        var overhang = Math.Min(0.1, thicknessMm/4);
+        foreach(var circle in roundHoles)
         {
-            // Extend the cutter past both faces to avoid coplanar CSG artifacts.
-            var overhang = Math.Min(0.1, thicknessMm/4);
             scad.Append("  translate([").Append(N(circle.Center.X))
                 .Append(", ").Append(N(circle.Center.Y))
                 .Append(", -").Append(N(overhang)).Append("]) ")
@@ -106,9 +105,38 @@ public static class DxfSynchronized3DExporter
                 .Append(", r = ").Append(N(circle.Radius))
                 .AppendLine(", center = false);");
         }
+        foreach(var verticesHole in polygonHoles)
+        {
+            scad.Append("  translate([0, 0, -").Append(N(overhang))
+                .Append("]) linear_extrude(height = ")
+                .Append(N(thicknessMm+2*overhang))
+                .AppendLine(", center = false, convexity = 10) {");
+            scad.Append("    polygon(points = [");
+            for(int i=0;i<verticesHole.Length;i++)
+            {
+                if(i>0)scad.Append(", ");
+                scad.Append('[').Append(N(verticesHole[i].X)).Append(", ")
+                    .Append(N(verticesHole[i].Y)).Append(']');
+            }
+            scad.AppendLine("]);");
+            scad.AppendLine("  }");
+        }
         scad.AppendLine("}");
         return new(scad.ToString(),thicknessMm,topology.NetAreaMm2,
-                   volume,holes.Count);
+                   volume,roundHoles.Count+polygonHoles.Count);
+    }
+
+    private static PreviewPoint[] ExtractVertices(PreviewPath ring,double epsilon)
+    {
+        if (!ring.Closed || ring.Segments.Count is < 3 or > 2000 ||
+            ring.Segments.Any(segment=>segment is not PreviewLine))
+            throw new FormatException("Polygonal 3D profile must contain straight edges.");
+        var segments = ring.Segments.Cast<PreviewLine>().ToArray();
+        var vertices = segments.Select(segment=>segment.Start).ToArray();
+        for(int i=0;i<segments.Length;i++)
+            if(Distance(segments[i].End,vertices[(i+1)%vertices.Length])>epsilon)
+                throw new FormatException("3D polygon edges are not joined exactly.");
+        return vertices;
     }
 
     private static (PreviewPoint Center,double Radius)? RecognizeCircle(
