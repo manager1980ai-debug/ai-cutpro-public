@@ -75,6 +75,10 @@
           <TextBlock Text="Фаска прямолинейного угла (отступ по обоим рёбрам, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
           <TextBox x:Name="ChamferSetbackBox" Text="5" Watermark="Отступ фаски, мм"/>
           <Button Content="Снять фаску выбранной вершины (предпросмотр)" Click="ChamferDxfVertexClicked"/>
+          <TextBlock Text="Точное скругление угла дугой ARC (радиус, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <TextBox x:Name="FilletRadiusBox" Text="5" Watermark="Радиус скругления, мм"/>
+          <Button Content="Скруглить выбранный угол (предпросмотр)" Click="FilletDxfVertexClicked"/>
+          <TextBlock Text="Номера контура и вершины выше; только выпуклые углы LINE-контуров. Геометрическая дуга ARC, без CAM." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Использует номера контура и вершины выше. Только замкнутые LINE-контуры; проверяются отверстия и DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Точный размер ребра, мм (номер вершины = начало ребра)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditEdgeLengthBox" Text="10" Watermark="Новая длина ребра, мм"/>
