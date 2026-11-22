@@ -1987,4 +1987,50 @@ foreach (var shift in new[] { 0d, 350d, 1500d })
 Assert(verifiedCircularNesting == 9,
        "All translated and scaled concentric four-level scenarios ran");
 
+// B3 multi-part independent geometry oracle: two disjoint rectangles,
+// each with its own circular through-hole, in translated/scaled drawings.
+// The outer regions must never be merged or the holes reassigned.
+int verifiedMultiPartHoles = 0;
+foreach (var scale in new[] { 0.5d, 1d, 2d })
+foreach (var shift in new[] { 0d, 300d, 1200d })
+{
+    Point2 Positioned(double x, double y) =>
+        new(shift + x*scale, shift/3 + y*scale);
+    var multiPartDrawing = Document(
+        Closed("PART_A", Positioned(0,0), Positioned(500,0),
+               Positioned(500,500), Positioned(0,500)),
+        new DxfCircle("HOLE_A", Positioned(250,250), 50*scale),
+        Closed("PART_B", Positioned(1000,100), Positioned(1300,100),
+               Positioned(1300,400), Positioned(1000,400)),
+        new DxfCircle("HOLE_B", Positioned(1150,250), 30*scale));
+    var expectedArea = scale*scale *
+        (250000d + 90000d - Math.PI*(2500d + 900d));
+    var verifiedPaths = PreviewDxfExporter.ValidateDocument(multiPartDrawing);
+    var topology = PreviewContourTopology.Analyze(verifiedPaths);
+    Assert(topology.IsValid && topology.Rings.Count == 4 &&
+           topology.Rings.Count(r=>r.Depth==0 && r.IsMaterialBoundary)==2 &&
+           topology.Rings.Count(r=>r.Depth==1 && !r.IsMaterialBoundary)==2 &&
+           Math.Abs(topology.NetAreaMm2-expectedArea) <
+               Math.Max(1e-5,expectedArea*1e-9),
+           "Two separated plates and circular holes match independent area oracle");
+    var assembly = DxfAssembly3DExporter.Export(multiPartDrawing, 6);
+    Assert(assembly.MaterialRegionCount==2 && assembly.HoleCount==2 &&
+           assembly.OpenScad.Split("difference()").Length-1==2 &&
+           assembly.OpenScad.Split("cylinder(h = ").Length-1==2 &&
+           Math.Abs(assembly.VolumeMm3-expectedArea*6) <
+               Math.Max(1e-4,expectedArea*6e-9) &&
+           !assembly.CanStartMachine,
+           "Multi-part CSG preserves both material regions and both circular voids");
+    var reimported = PreviewDxfRoundTripVerifier.Verify(
+        verifiedPaths,PreviewDxfExporter.Export(verifiedPaths));
+    var afterRoundTrip = PreviewContourTopology.Analyze(reimported);
+    Assert(afterRoundTrip.IsValid && reimported.Count==4 &&
+           Math.Abs(afterRoundTrip.NetAreaMm2-expectedArea) <
+               Math.Max(1e-5,expectedArea*1e-9),
+           "Separated plates with holes preserve exact analytic DXF round-trip");
+    verifiedMultiPartHoles++;
+}
+Assert(verifiedMultiPartHoles==9,
+       "All translated and scaled independent multi-part hole scenarios ran");
+
 Console.WriteLine("AI CutPro core checks passed.");
