@@ -71,6 +71,27 @@ def probe_tab_navigation(window):
         raise RuntimeError("Empty diagnostics window has no explanatory guidance")
     diagnostic_window.close()
     print("GUI diagnostic panel PASS: opened separate offline report and empty-state guidance")
+    invoke(button_named("Технологические линии (предпросмотр)"))
+    preview_window = None
+    for _ in range(20):
+        windows = [w for w in Desktop(backend="uia").windows()
+                   if w.process_id() == window.process_id()
+                   and "Технологические линии" in w.window_text()]
+        if windows:
+            preview_window = windows[0]
+            break
+        time.sleep(0.25)
+    if preview_window is None:
+        raise RuntimeError("Sheet operations preview did not open")
+    preview_texts = [w.window_text() for w in
+                     preview_window.descendants(control_type="Text")]
+    if not any("Предпросмотр: 1 сегментов" in t for t in preview_texts):
+        raise RuntimeError("5-mm inset sample open-cut preview was not generated")
+    if not any("резка запрещена" in t.lower() for t in preview_texts):
+        raise RuntimeError("Sheet operation preview lacked machine safety notice")
+    preview_window.close()
+    print("GUI operation preview PASS: editable open-cut preview without machine control")
+
 
 
 
