@@ -493,8 +493,11 @@ public partial class MainWindow : Window
                     if (!ParseValue(ExportRotationBox.Text,out var angle) ||
                         Math.Abs(angle)>360_000)
                         throw new FormatException("Неверный угол поворота.");
+                    if (!ParseValue(RotationPivotXBox.Text,out var pivotX) ||
+                        !ParseValue(RotationPivotYBox.Text,out var pivotY))
+                        throw new FormatException("Неверные координаты центра поворота X/Y.");
                     edited = PreviewRigidTransformEditor.Rotate(
-                        before,new PreviewPoint(0,0),angle,toleranceMm);
+                        before,new PreviewPoint(pivotX,pivotY),angle,toleranceMm);
                     break;
                 case "зеркало":
                     if (!ParseValue(MirrorAxisXBox.Text,out var axisX))
