@@ -39,6 +39,12 @@
           <TextBox x:Name="DxfUnitsBox" Watermark="1=дюйм, 2=фут, 4=мм, 5=см, 6=м"/>
           <TextBlock Text="Пустое поле: только исходный просмотр, без пересчёта. Единицы не угадываются." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Открыть DXF (предпросмотр)" Click="ImportDxfClicked"/>
+          <TextBlock Text="История изменений DXF (до 30 шагов)" Foreground="#E8F4FF" FontWeight="Bold"/>
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+            <Button Grid.Column="0" Content="Отменить изменение" Click="UndoDxfClicked"/>
+            <Button Grid.Column="1" Content="Повторить изменение" Click="RedoDxfClicked"/>
+          </Grid>
+          <TextBlock Text="История хранится только в памяти приложения. При открытии другого файла или нового раскроя начинается заново." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Изменить контуры при сохранении DXF (мм, градусы)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="ExportMoveXBox" Text="0" Watermark="Смещение X, мм"/>
           <TextBox x:Name="ExportMoveYBox" Text="0" Watermark="Смещение Y, мм"/>
