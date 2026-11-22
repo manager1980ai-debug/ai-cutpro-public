@@ -1572,4 +1572,60 @@ Assert(Math.Abs(restoredHalfDisc.NetAreaMm2 -
        Math.Abs(((PreviewArc)restoredHalfDisc.Rings[1].Segments[0]).SweepDegrees-180)<1e-7,
        "Endpoint-locked ARC radius can be restored without changing nested topology");
 
+// B2 numeric regression: both ARC directions and minor/major sweeps. Use
+// an independent circular-segment area formula, not the CAD integration code.
+int testedArcBranches = 0;
+foreach (double originalSweep in new[]{60d,120d,240d,300d,-60d,-120d,-240d,-300d})
+{
+    var arcCenter = new PreviewPoint(500,500);
+    var initialArc = new PreviewArc(arcCenter,20,25,originalSweep);
+    static PreviewPoint ArcAt(PreviewArc a, double angle)
+    {
+        var rad = angle * Math.PI / 180;
+        return new PreviewPoint(a.Center.X+a.RadiusMm*Math.Cos(rad),
+                                a.Center.Y+a.RadiusMm*Math.Sin(rad));
+    }
+    var fixedStart=ArcAt(initialArc,initialArc.StartDegrees);
+    var fixedEnd=ArcAt(initialArc,initialArc.StartDegrees+initialArc.SweepDegrees);
+    var closedArc = new PreviewPath([
+        initialArc,new PreviewLine(fixedEnd,fixedStart)],true);
+    var originalMeasure=PreviewContourTopology.Analyze([closedArc]);
+    Assert(originalMeasure.IsValid,"ARC regression source must be a valid ring");
+    foreach(double targetRadius in new[]{25d,40d})
+    {
+        var editedArcRing=PreviewArcRadiusEditor.SetRadius(
+            [closedArc],0,0,targetRadius).Rings[0];
+        var changed=(PreviewArc)editedArcRing.Segments[0];
+        var currentStart=ArcAt(changed,changed.StartDegrees);
+        var currentEnd=ArcAt(changed,changed.StartDegrees+changed.SweepDegrees);
+        Assert(Math.Abs(changed.RadiusMm-targetRadius)<1e-8 &&
+               Math.Sqrt(Math.Pow(currentStart.X-fixedStart.X,2)+
+                         Math.Pow(currentStart.Y-fixedStart.Y,2))<1e-6 &&
+               Math.Sqrt(Math.Pow(currentEnd.X-fixedEnd.X,2)+
+                         Math.Pow(currentEnd.Y-fixedEnd.Y,2))<1e-6,
+               "CW/CCW ARC edit preserves chord endpoints and the exact radius");
+        Assert(Math.Sign(changed.SweepDegrees)==Math.Sign(originalSweep) &&
+               (Math.Abs(changed.SweepDegrees)>180)==(Math.Abs(originalSweep)>180),
+               "ARC edit preserves CW/CCW direction and original minor/major branch");
+        var absoluteSweep=Math.Abs(changed.SweepDegrees)*Math.PI/180;
+        var independentArea=0.5*targetRadius*targetRadius*
+            (absoluteSweep-Math.Sin(absoluteSweep));
+        var independentPerimeter=targetRadius*absoluteSweep+
+            Math.Sqrt(Math.Pow(fixedStart.X-fixedEnd.X,2)+
+                      Math.Pow(fixedStart.Y-fixedEnd.Y,2));
+        var actualMeasure=PreviewContourMetrics.Measure(editedArcRing);
+        Assert(actualMeasure.IsValid &&
+               Math.Abs(actualMeasure.AreaMm2-independentArea)<1e-6 &&
+               Math.Abs(actualMeasure.PerimeterMm-independentPerimeter)<1e-6,
+               "Analytic ARC area and perimeter match independent circular segment equations");
+        testedArcBranches++;
+    }
+    var halfChord=Math.Sqrt(Math.Pow(fixedStart.X-fixedEnd.X,2)+
+                            Math.Pow(fixedStart.Y-fixedEnd.Y,2))/2;
+    Assert(RejectArcRadius([closedArc],0,0,halfChord*(1-1e-12)),
+           "Radius a fraction below half of the chord is physically impossible");
+}
+Assert(testedArcBranches==16,
+       "All CW/CCW and minor/major analytical ARC radius scenarios executed");
+
 Console.WriteLine("AI CutPro core checks passed.");
