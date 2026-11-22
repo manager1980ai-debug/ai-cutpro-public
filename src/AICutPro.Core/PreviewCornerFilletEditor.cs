@@ -1,7 +1,7 @@
 namespace AICutPro.Core;
 
 /// <summary>
-/// Preview-only circular fillet of a convex corner in a verified closed
+/// Preview-only circular fillet of a convex or concave corner in a verified closed
 /// LINE-only ring. Builds an exact tangent ARC, never a polyline approximation.
 /// This is CAD geometry only, not toolpath radius compensation.
 /// </summary>
@@ -60,11 +60,13 @@ public static class PreviewCornerFilletEditor
             var a=vertices[i];var b=vertices[(i+1)%n];
             twiceArea+=a.X*b.Y-b.X*a.Y;
         }
-        // A convex corner relative to this ring's orientation has its
-        // incoming/outgoing turn in the same direction as the signed area.
+        // The signed turn sets CW/CCW for both convex and concave corners.
+        // In a concave notch the tangent arc adds material rather than
+        // cutting it away. The final exact topology and hole-parent checks
+        // reject any intrusion into an adjacent contour or narrow channel.
+        if (!double.IsFinite(twiceArea) || Math.Abs(twiceArea)<=toleranceMm*toleranceMm)
+            throw new FormatException("Fillet ring has ambiguous orientation.");
         var turn=-cross;
-        if (Math.Sign(turn)!=Math.Sign(twiceArea))
-            throw new FormatException("Concave fillet corners are not yet supported.");
 
         var half=theta/2;
         var setback=radiusMm/Math.Tan(half);
