@@ -466,6 +466,10 @@ public partial class MainWindow : Window
         Avalonia.Interactivity.RoutedEventArgs e) =>
         ApplyRigidDxfEdit("зеркало");
 
+    private void MirrorHorizontalDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyRigidDxfEdit("горизонтальное зеркало");
+
     private void ApplyRigidDxfEdit(string operation)
     {
         try
@@ -504,6 +508,12 @@ public partial class MainWindow : Window
                         throw new FormatException("Неверная вертикальная ось зеркала.");
                     edited = PreviewRigidTransformEditor.MirrorVertical(
                         before,axisX,toleranceMm);
+                    break;
+                case "горизонтальное зеркало":
+                    if (!ParseValue(MirrorAxisYBox.Text,out var axisY))
+                        throw new FormatException("Неверная горизонтальная ось зеркала.");
+                    edited = PreviewRigidTransformEditor.MirrorHorizontal(
+                        before,axisY,toleranceMm);
                     break;
                 default:
                     throw new FormatException("Неизвестное геометрическое преобразование.");
