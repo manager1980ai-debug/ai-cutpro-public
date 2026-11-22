@@ -1,0 +1,73 @@
+namespace AICutPro.Core;
+
+/// <summary>
+/// Bounded, read-only 2D drafting primitive for moving one vertex of a strictly
+/// line-only closed ring. The complete ring set is validated before returning.
+/// Circular arcs must never be silently distorted by moving their endpoints.
+/// A result cannot authorize CAM or physical equipment control.
+/// </summary>
+public sealed record PreviewVertexEditResult(
+    IReadOnlyList<PreviewPath> Rings,
+    double NetAreaMm2,
+    bool IsValidForPreview)
+{
+    public bool CanStartMachine => false;
+}
+
+public static class PreviewVertexEditor
+{
+    /// <param name="ringIndex">Zero-based index in a verified ring set.</param>
+    /// <param name="vertexIndex">Zero-based index; segment i starts at vertex i.</param>
+    public static PreviewVertexEditResult MoveVertex(
+        IReadOnlyList<PreviewPath> rings, int ringIndex, int vertexIndex,
+        PreviewPoint position, double toleranceMm = 0.01)
+    {
+        ArgumentNullException.ThrowIfNull(rings);
+        if(!double.IsFinite(position.X) || !double.IsFinite(position.Y) ||
+           Math.Abs(position.X)>1_000_000 || Math.Abs(position.Y)>1_000_000)
+            throw new FormatException("Invalid or unbounded vertex coordinates.");
+        if(!double.IsFinite(toleranceMm)||toleranceMm<0.0001||toleranceMm>1)
+            throw new ArgumentOutOfRangeException(nameof(toleranceMm));
+        if(rings.Count is < 1 or > 1000 ||
+           ringIndex<0 || ringIndex>=rings.Count)
+            throw new FormatException("Invalid ring index.");
+        var original=PreviewContourTopology.Analyze(rings,toleranceMm);
+        if(!original.IsValid)
+            throw new FormatException("Original contour topology is not verified.");
+        var source=rings[ringIndex];
+        if(!source.Closed || source.Segments.Count is < 3 or > 2000 ||
+           source.Segments.Any(s=>s is not PreviewLine))
+            throw new FormatException("Vertex editing requires a closed line-only ring (no ARC).");
+        if(vertexIndex<0 || vertexIndex>=source.Segments.Count)
+            throw new FormatException("Invalid vertex index.");
+        var vertices=source.Segments.Cast<PreviewLine>().Select(l=>l.Start).ToArray();
+        // Never invent a new topology from an already disconnected original.
+        for(int i=0;i<vertices.Length;i++)
+        {
+            var line=(PreviewLine)source.Segments[i];
+            var next=vertices[(i+1)%vertices.Length];
+            if(Distance(line.End,next)>toleranceMm)
+                throw new FormatException("Original ring has mismatched vertex endpoints.");
+        }
+        vertices[vertexIndex]=position;
+        var editedLines=new List<PreviewSegment>(vertices.Length);
+        for(int i=0;i<vertices.Length;i++)
+        {
+            var a=vertices[i];
+            var b=vertices[(i+1)%vertices.Length];
+            if(Distance(a,b)<=toleranceMm)
+                throw new FormatException("Vertex edit creates a degenerate edge.");
+            editedLines.Add(new PreviewLine(a,b));
+        }
+        var updated=rings.ToArray();
+        updated[ringIndex]=new PreviewPath(editedLines,true);
+        var checkedTopology=PreviewContourTopology.Analyze(updated,toleranceMm);
+        if(!checkedTopology.IsValid)
+            throw new FormatException("Vertex edit invalidates ring topology: " +
+                string.Join("; ",checkedTopology.Issues));
+        return new(updated,checkedTopology.NetAreaMm2,true);
+    }
+
+    private static double Distance(PreviewPoint a,PreviewPoint b) =>
+        Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Y-b.Y)*(a.Y-b.Y));
+}

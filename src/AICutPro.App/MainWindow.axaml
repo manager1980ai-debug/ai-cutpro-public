@@ -1,0 +1,110 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AICutPro.App.MainWindow"
+        Title="AI CutPro — Интеллектуальное управление резкой"
+        Width="1440" Height="900" MinWidth="1000" MinHeight="650"
+        Background="#0B1523">
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14">
+    <TextBlock Grid.Row="0" Text="AI CutPro   •   Локальный прототип • Без подключения к станку"
+               Foreground="#E8F4FF" FontSize="21" FontWeight="Bold" Margin="4,6,4,14"/>
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10" Margin="0,0,0,12">
+      <Button Content="Задание" Click="TabClicked" Tag="Задание"/>
+      <Button Content="Чертёж и модель" Click="TabClicked" Tag="Чертёж и модель"/>
+      <Button Content="Раскрой" Click="TabClicked" Tag="Раскрой"/>
+      <Button Content="Параметры резки" Click="TabClicked" Tag="Параметры резки"/>
+      <Button Content="Симуляция" Click="TabClicked" Tag="Симуляция"/>
+      <Button Content="Производство" Click="TabClicked" Tag="Производство"/>
+      <Button Content="История" Click="TabClicked" Tag="История"/>
+      <Button Content="Архив" Click="TabClicked" Tag="Архив"/>
+    </StackPanel>
+    <Grid Grid.Row="2" ColumnDefinitions="210,*,250">
+      <Border Grid.Column="0" Background="#14263B" CornerRadius="10" Padding="14">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="14">
+          <TextBlock Text="Текущее задание" Foreground="#E8F4FF" FontSize="18" FontWeight="Bold"/>
+          <TextBlock Text="Кронштейн × 10" Foreground="#81CBFF"/>
+          <TextBlock Text="Материал: сталь S355" Foreground="White"/>
+          <TextBlock Text="Толщина: 5 мм" Foreground="White"/>
+          <TextBlock Text="Размер стола станка, мм" Foreground="#E8F4FF" FontWeight="Bold"/>
+          <TextBox x:Name="TableWidthBox" Text="4000" Watermark="Ширина стола"/>
+          <TextBox x:Name="TableHeightBox" Text="2000" Watermark="Высота стола"/>
+          <TextBlock Text="Размер листа, мм" Foreground="#E8F4FF" FontWeight="Bold"/>
+          <TextBox x:Name="SheetWidthBox" Text="3000" Watermark="Ширина листа"/>
+          <TextBox x:Name="SheetHeightBox" Text="1500" Watermark="Высота листа"/>
+          <Button Content="Применить размеры" Click="ApplyWorkspaceClicked"/>
+          <Button Content="Новый раскрой" Click="NewLayoutClicked"/>
+          <TextBlock Text="DXF: допуск соединения (мм)" Foreground="#E8F4FF" FontWeight="Bold"/>
+          <TextBox x:Name="DxfToleranceBox" Text="0.01" Watermark="0.0001–1 мм"/>
+          <TextBlock Text="DXF: подтвердите исходные единицы (необязательно для просмотра)" Foreground="#E8F4FF" TextWrapping="Wrap"/>
+          <TextBox x:Name="DxfUnitsBox" Watermark="1=дюйм, 2=фут, 4=мм, 5=см, 6=м"/>
+          <TextBlock Text="Пустое поле: только исходный просмотр, без пересчёта. Единицы не угадываются." Foreground="#9CB3C9" TextWrapping="Wrap"/>
+          <Button Content="Открыть DXF (предпросмотр)" Click="ImportDxfClicked"/>
+          <TextBlock Text="Изменить контуры при сохранении DXF (мм, градусы)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
+          <TextBox x:Name="ExportMoveXBox" Text="0" Watermark="Смещение X, мм"/>
+          <TextBox x:Name="ExportMoveYBox" Text="0" Watermark="Смещение Y, мм"/>
+          <TextBox x:Name="ExportRotationBox" Text="0" Watermark="Поворот вокруг начала, °"/>
+          <TextBlock Text="Вершина прямолинейного контура (нумерация с 1)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
+          <TextBox x:Name="EditRingIndexBox" Text="1" Watermark="Номер контура"/>
+          <TextBox x:Name="EditVertexIndexBox" Text="1" Watermark="Номер вершины"/>
+          <TextBox x:Name="EditVertexXBox" Text="0" Watermark="Новый X, мм"/>
+          <TextBox x:Name="EditVertexYBox" Text="0" Watermark="Новый Y, мм"/>
+          <Button Content="Переместить вершину (предпросмотр)" Click="EditDxfVertexClicked"/>
+          <TextBlock Text="Только замкнутые прямолинейные контуры. Все изменения проверяются; дуговые вершины пока нельзя редактировать." Foreground="#9CB3C9" TextWrapping="Wrap"/>
+          <Button Content="Сохранить проверенные контуры DXF" Click="ExportEditedDxfClicked"/>
+          <TextBlock Text="Только замкнутые LINE/ARC/CIRCLE-контуры без предупреждений. Исходный файл не перезаписывается автоматически; резка отключена." TextWrapping="Wrap" Foreground="#9CB3C9"/>
+
+          <TextBlock Text="Текстовый 2D-эскиз (мм)" Foreground="#E8F4FF" FontWeight="Bold"/>
+          <TextBox x:Name="TextSketchBox" Text="PLATE 200 100 5; HOLE 50 50 10"
+                   TextWrapping="Wrap" AcceptsReturn="True" Height="64"/>
+          <Button Content="Построить пластину (2D + параметры 3D)" Click="BuildTextSketchClicked"/>
+          <TextBlock Text="Команды: PLATE ширина высота толщина; HOLE X Y радиус. Только параметрическая модель, без 3D-меша и резки." Foreground="#9CB3C9" TextWrapping="Wrap"/>
+
+          <TextBlock Text="Управление станком отключено в прототипе." TextWrapping="Wrap" Foreground="#9CB3C9"/>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+      <Border Grid.Column="1" Background="#14263B" CornerRadius="10" Padding="16">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <TextBlock x:Name="PanelTitle" Text="Раскрой листа 3000 × 1500 мм" FontSize="20" FontWeight="Bold" Foreground="#E8F4FF"/>
+          <Canvas x:Name="SheetCanvas" Grid.Row="1" Background="#0B1E31" ClipToBounds="True"
+                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch" SizeChanged="CanvasSizeChanged"/>
+          <TextBlock Grid.Row="2" x:Name="StatusText" Text="Готово к симуляции" Foreground="#82D1FF"/>
+        </Grid>
+      </Border>
+      <Border Grid.Column="2" Background="#14263B" CornerRadius="10" Padding="14">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Виртуальный станок" FontWeight="Bold" FontSize="18" Foreground="White"/>
+          <TextBlock Text="Контроллер: не подключён" Foreground="#E0A45D"/>
+          <TextBlock x:Name="WorkspaceText" Foreground="White" TextWrapping="Wrap"/>
+          <TextBlock Text="Виртуальная головка (X/Y/Z), мм" Foreground="#E8F4FF" FontWeight="Bold"/>
+          <Grid ColumnDefinitions="*,*,*">
+            <TextBox x:Name="HeadXBox" Grid.Column="0" Text="0" Watermark="X"/>
+            <TextBox x:Name="HeadYBox" Grid.Column="1" Text="0" Watermark="Y"/>
+            <TextBox x:Name="HeadZBox" Grid.Column="2" Text="0" Watermark="Z"/>
+          </Grid>
+          <Button Content="Переместить виртуально" Click="MoveVirtualHeadClicked"/>
+          <Button Content="Установить рабочий ноль" Click="SetWorkZeroClicked"/>
+          <TextBlock x:Name="CoordinatesText" TextWrapping="Wrap" Foreground="#82D1FF"/>
+          <TextBlock x:Name="CheckpointText" TextWrapping="Wrap" Foreground="#9CB3C9"/>
+          <TextBlock x:Name="PartsText" Foreground="#80CBFF"/>
+          <TextBlock Text="Выбранная деталь" FontWeight="Bold" Foreground="#E8F4FF" Margin="0,10,0,0"/>
+          <TextBlock x:Name="SelectedPartText" TextWrapping="Wrap" Foreground="White"/>
+          <TextBlock Text="Отверстия DXF (диаметры)" FontWeight="Bold" Foreground="#E8F4FF" Margin="0,10,0,0"/>
+          <TextBlock x:Name="HoleSummaryText" TextWrapping="Wrap" Foreground="#81CBFF"/>
+          <TextBlock Text="Колесо: масштаб • правая/средняя кнопка: сдвиг • левая: выбор детали" TextWrapping="Wrap" Foreground="#9CB3C9"/>
+          <TextBlock x:Name="UtilizationText" Foreground="#4CE58A" FontSize="22" FontWeight="Bold"/>
+          <TextBlock x:Name="WasteText" Foreground="White"/>
+          <TextBlock Text="Примечание: первый алгоритм размещает ограничивающие прямоугольники деталей. Отверстия и траектории реза пока не рассчитаны."
+                     TextWrapping="Wrap" Foreground="#9CB3C9"/>
+        </StackPanel>
+      </Border>
+    </Grid>
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right"
+                Spacing="12" Margin="0,14,0,2">
+      <Button Content="Ручное управление (виртуально)" Click="ManualClicked"/>
+      <Button Content="Симуляция" Click="SimulateClicked"/>
+      <Button Content="Сохранить" Click="SaveClicked"/>
+      <Button Content="Запуск резки (недоступен)" IsEnabled="False"/>
+    </StackPanel>
+  </Grid>
+</Window>

@@ -1,0 +1,982 @@
+using System.Text.Json;
+using AICutPro.Core;
+
+static void Assert(bool condition, string message)
+{
+    if (!condition) throw new Exception("CHECK FAILED: " + message);
+}
+
+// Project format: round trip, unsupported versions, and malformed dimensions.
+var project = CutProject.CreateDefault() with
+{
+    Name = "Проверка сохранения",
+    Sheet = new Sheet(2500, 1250),
+    Parts = [new Part("Фланец", 120, 95, 3)],
+    Material = "S355",
+    ThicknessMm = 5
+};
+var reloaded = CutProjectSerializer.Deserialize(CutProjectSerializer.Serialize(project));
+Assert(reloaded.Name == project.Name && reloaded.Sheet.WidthMm == 2500 &&
+       reloaded.Parts[0].Name == "Фланец" && reloaded.Parts[0].Quantity == 3 &&
+       reloaded.Material == "S355" && reloaded.ThicknessMm == 5,
+       "Project survives save/open round trip");
+static bool RejectProject(string content)
+{
+    try { CutProjectSerializer.Deserialize(content); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectProject("{invalid"), "Invalid project JSON rejected");
+Assert(RejectProject(JsonSerializer.Serialize(project with { FormatVersion = 99 })),
+       "Unknown project version rejected");
+Assert(RejectProject(JsonSerializer.Serialize(project with { Sheet = new Sheet(-1, 1250) })),
+       "Invalid sheet dimension rejected");
+Assert(RejectProject(JsonSerializer.Serialize(project with { Parts = [new Part("Фланец", 120, 95, 0)] })),
+       "Invalid part quantity rejected");
+
+var result = ShelfNester.Arrange(SampleJob.Sheet, SampleJob.Parts);
+Assert(result.Placements.Count == 10, "All sample parts fit");
+Assert(result.Warnings.Count == 0, "No warnings for sample");
+Assert(result.UsedAreaMm2 == 10 * 180 * 220, "Used area");
+Assert(result.UtilizationPercent > 0 && result.UtilizationPercent <= 100, "Utilization percentage");
+
+foreach (var part in result.Placements)
+{
+    Assert(part.Xmm >= 0 && part.Ymm >= 0, "Nonnegative origin");
+    Assert(part.Xmm + part.WidthMm <= result.Sheet.WidthMm, "Part fits sheet width");
+    Assert(part.Ymm + part.HeightMm <= result.Sheet.HeightMm, "Part fits sheet height");
+}
+for (int i = 0; i < result.Placements.Count; i++)
+for (int j = i + 1; j < result.Placements.Count; j++)
+{
+    var a = result.Placements[i];
+    var b = result.Placements[j];
+    Assert(a.Xmm + a.WidthMm <= b.Xmm || b.Xmm + b.WidthMm <= a.Xmm ||
+           a.Ymm + a.HeightMm <= b.Ymm || b.Ymm + b.HeightMm <= a.Ymm,
+           "Placements do not overlap");
+}
+var small = ShelfNester.Arrange(new Sheet(100, 100), [new Part("Big", 200, 200, 1)]);
+Assert(small.Placements.Count == 0 && small.Warnings.Count == 1, "Oversized part is rejected");
+var threw = false;
+try { ShelfNester.Arrange(new Sheet(0, 10), SampleJob.Parts); }
+catch (ArgumentOutOfRangeException) { threw = true; }
+Assert(threw, "Invalid sheet is rejected");
+
+var dxf = string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","LINE","8","CUT","10","0","20","0","11","180","21","0",
+    "0","CIRCLE","8","HOLES","10","45","20","70","40","12",
+    "0","LWPOLYLINE","8","CUT","90","3","70","1","10","0","20","0",
+    "10","180","20","0","10","90","20","220",
+    "0","ENDSEC","0","EOF"
+});
+var preview = DxfReader.Parse(dxf);
+Assert(preview.InsUnits == 4, "DXF units read");
+Assert(preview.Shapes.Count == 3, "Supported DXF entities parsed");
+Assert(preview.Warnings.Count == 0, "Valid DXF has no warnings");
+Assert(preview.Shapes[0] is DxfLine { Layer: "CUT" }, "Line layer");
+Assert(preview.Shapes[1] is DxfCircle { Radius: 12 }, "Circle radius");
+Assert(preview.Shapes[2] is DxfPolyline { Closed: true }, "Closed polyline");
+var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
+Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
+var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
+Assert(rejectedArc.Shapes.Count == 1 && rejectedArc.Shapes[0] is DxfBulgedPolyline && rejectedArc.Warnings.Any(),
+       "Bulge arc preserved for inspection, never silently admitted to CAM");
+var curvedPreview = DxfBulgePreview.Build((DxfBulgedPolyline)rejectedArc.Shapes[0]);
+Assert(curvedPreview.Segments[0] is PreviewArc, "Bulge produces analytic preview arc");
+Assert(!GeometryPreflight.Inspect(rejectedArc, new Sheet(100, 100)).CanGenerateMachineCommands,
+       "Bulged DXF cannot directly generate machine commands");
+
+
+static DxfImportResult Document(params DxfShape[] shapes) => new(shapes, [], 4);
+static DxfPolyline Closed(string layer, params Point2[] pts) => new(layer, pts, true);
+var rectangle = Closed("CUT",new Point2(0,0),new Point2(200,0),new Point2(200,100),new Point2(0,100));
+var innerHole = Closed("HOLE",new Point2(20,20),new Point2(40,20),new Point2(40,40),new Point2(20,40));
+var circleHole = new DxfCircle("HOLE",new Point2(100,50),10);
+var analyzed = ProfileAnalyzer.Analyze(Document(rectangle,innerHole,circleHole));
+Assert(analyzed.Profiles.Count == 1, "One outer profile");
+Assert(analyzed.Profiles[0].InnerPolygons.Count == 1, "One inner polygon");
+Assert(analyzed.Profiles[0].CircularHoles.Count == 1, "One circular hole");
+Assert(Math.Abs(analyzed.Profiles[0].OuterAreaMm2-20000)<1e-8,"Correct outer area");
+Assert(Math.Abs(analyzed.Profiles[0].NetAreaMm2-(20000-400-Math.PI*100))<1e-8,"Correct net area");
+var separate = ProfileAnalyzer.Analyze(Document(rectangle,
+    Closed("CUT",new Point2(300,0),new Point2(350,0),new Point2(350,50),new Point2(300,50))));
+Assert(separate.Profiles.Count==2,"Two separate parts");
+var touching=ProfileAnalyzer.Analyze(Document(rectangle,
+    Closed("CUT",new Point2(200,50),new Point2(250,50),new Point2(250,70),new Point2(200,70))));
+Assert(touching.Profiles.Count==0 && touching.Warnings.Count>0,"Touching contours rejected");
+var crossing=ProfileAnalyzer.Analyze(Document(
+    Closed("CUT",new Point2(0,0),new Point2(100,100),new Point2(0,100),new Point2(100,0))));
+Assert(crossing.Profiles.Count==0 && crossing.Warnings.Count>0,"Self intersecting ring rejected");
+var outsideHole=ProfileAnalyzer.Analyze(Document(rectangle,new DxfCircle("HOLE",new Point2(190,50),20)));
+Assert(outsideHole.Profiles.Count==0 && outsideHole.Warnings.Count>0,"Hole crossing outside boundary rejected");
+var unverifiedUnits=ProfileAnalyzer.Analyze(new DxfImportResult([rectangle],[],null));
+Assert(unverifiedUnits.Profiles.Count==0,"Units must be millimetres");
+
+
+var arcsDxf = string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","ARC","8","CURVES","10","100","20","100","40","25","50","350","51","10",
+    "0","ENDSEC","0","EOF"
+});
+var arcsResult = DxfReader.Parse(arcsDxf);
+Assert(arcsResult.Warnings.Count == 0, "Valid ARC DXF has no warnings");
+Assert(arcsResult.Shapes.Count == 1 && arcsResult.Shapes[0] is DxfArc, "ARC recognized");
+var arc = (DxfArc)arcsResult.Shapes[0];
+var arcPreview = DxfArcPreview.Sample(arc);
+Assert(arcPreview.Count > 2, "ARC preview has multiple points");
+Assert(Math.Abs(arcPreview[0].X - arcPreview[^1].X) < 1e-8, "Wrapped ARC endpoints symmetric");
+Assert(arcPreview.All(p => Math.Abs(Math.Sqrt((p.X-100)*(p.X-100)+(p.Y-100)*(p.Y-100))-25)<1e-8), "ARC preview points on circle");
+var arcOnly = ProfileAnalyzer.Analyze(arcsResult);
+Assert(arcOnly.Profiles.Count == 0, "Preview-only ARC never converted to manufacturing profile");
+var malformedArc = DxfReader.Parse(arcsDxf.Replace("\n50\n350\n51\n10", "\n50\n350\n51\n350"));
+Assert(malformedArc.Shapes.Count == 0 && malformedArc.Warnings.Count > 0, "Zero sweep ARC rejected");
+
+
+// Geometry-only path preview: arc length, segment joining and strict rejection.
+var quarterCircle = new PreviewArc(new PreviewPoint(0, 0), 10, 0, 90);
+var virtualArc = VirtualToolpath.Sample(new PreviewPath([quarterCircle], false), 0.01);
+Assert(virtualArc.IsValidForPreview && virtualArc.Points.Count > 2, "Arc preview samples created");
+Assert(Math.Abs(virtualArc.LengthMm - Math.PI * 5) < 1e-8, "Arc uses true circular length");
+Assert(Math.Abs(virtualArc.Points[0].X - 10) < 1e-8, "Arc starting point");
+Assert(Math.Abs(virtualArc.Points[^1].Y - 10) < 1e-8, "Arc endpoint");
+Assert(virtualArc.Warnings.Any(w => w.Contains("PREVIEW ONLY")), "Preview is explicitly non-manufacturing");
+
+var continuous = VirtualToolpath.Sample(new PreviewPath([
+    new PreviewLine(new PreviewPoint(0,0), new PreviewPoint(10,0)),
+    new PreviewArc(new PreviewPoint(10,10), 10, 270, 90)
+], false));
+Assert(continuous.IsValidForPreview, "Joined line-arc chain accepted");
+Assert(Math.Abs(continuous.LengthMm - (10 + 5 * Math.PI)) < 1e-8, "Combined line and arc lengths");
+var disconnected = VirtualToolpath.Sample(new PreviewPath([
+    new PreviewLine(new PreviewPoint(0,0), new PreviewPoint(1,0)),
+    new PreviewLine(new PreviewPoint(2,0), new PreviewPoint(3,0))
+], false));
+Assert(!disconnected.IsValidForPreview, "Disconnected chain rejected");
+var unclosed = VirtualToolpath.Sample(new PreviewPath([
+    new PreviewLine(new PreviewPoint(0,0), new PreviewPoint(1,0))
+], true));
+Assert(!unclosed.IsValidForPreview, "Unclosed contour rejected");
+var badRadius = VirtualToolpath.Sample(new PreviewPath([
+    new PreviewArc(new PreviewPoint(0,0), -1, 0, 90)
+], false));
+Assert(!badRadius.IsValidForPreview, "Negative radius rejected");
+var badNumber = VirtualToolpath.Sample(new PreviewPath([
+    new PreviewLine(new PreviewPoint(double.NaN,0), new PreviewPoint(1,0))
+], false));
+Assert(!badNumber.IsValidForPreview, "Nonfinite coordinates rejected");
+
+
+static DxfLine Segment(Point2 a, Point2 b, string layer="CUT") => new(layer,a,b);
+var a0=new Point2(0,0); var a1=new Point2(100,0);
+var a2=new Point2(100,50);var a3=new Point2(0,50);
+var shuffledLines=new DxfLine[] {
+    Segment(a2,a3), Segment(a0,a3), Segment(a1,a0), Segment(a1,a2)
+};
+var assembledRectangle=LineContourAssembler.Assemble(shuffledLines);
+Assert(assembledRectangle.Complete && assembledRectangle.ClosedContours.Count==1,"Unordered/reversed LINE segments form one ring");
+var classifiedRectangle=ProfileAnalyzer.Analyze(Document(shuffledLines));
+Assert(classifiedRectangle.Profiles.Count==1, "LINE ring integrated into DXF analysis");
+Assert(Math.Abs(classifiedRectangle.Profiles[0].NetAreaMm2 - 5000)<1e-8,"LINE ring area correct");
+var assembledNear=LineContourAssembler.Assemble([
+    Segment(a0,new Point2(100.002,0)),Segment(a1,a2),Segment(a2,a3),Segment(a3,a0)], 0.005);
+Assert(assembledNear.Complete && assembledNear.ClosedContours.Count==1,"Small gaps within tolerance are joined");
+var tooWide=LineContourAssembler.Assemble([
+    Segment(a0,new Point2(100.2,0)),Segment(a1,a2),Segment(a2,a3),Segment(a3,a0)], 0.01);
+Assert(!tooWide.Complete && tooWide.Warnings.Count>0,"Large gap rejected");
+var branch=LineContourAssembler.Assemble([
+    ..shuffledLines, Segment(a0,new Point2(-20,-20))]);
+Assert(!branch.Complete,"Branching endpoint rejected");
+var duplicate=LineContourAssembler.Assemble([
+    ..shuffledLines,Segment(a0,a1)]);
+Assert(!duplicate.Complete,"Duplicate edge rejected");
+var lineCross=ProfileAnalyzer.Analyze(Document(
+    Segment(new Point2(0,0),new Point2(50,50)),
+    Segment(new Point2(50,50),new Point2(0,50)),
+    Segment(new Point2(0,50),new Point2(50,0)),
+    Segment(new Point2(50,0),new Point2(0,0))));
+Assert(lineCross.Profiles.Count==0 && lineCross.Warnings.Count>0,"Self-crossing assembled contour rejected");
+var nonFinite=LineContourAssembler.Assemble([Segment(new Point2(double.NaN,0),a1)]);
+Assert(!nonFinite.Complete,"Nonfinite input rejected");
+var mixedLineArc=ProfileAnalyzer.Analyze(Document(shuffledLines[0],new DxfArc("CUT",new Point2(0,0),20,0,90)));
+Assert(mixedLineArc.Profiles.Count==0 && mixedLineArc.Warnings.Count>0,"No premature line+arc CAD classification");
+
+
+var halfArc=new DxfArc("CUT",new Point2(0,0),10,0,180);
+var chord=new DxfLine("CUT",new Point2(-10,0),new Point2(10,0));
+var mixed=MixedContourAssembler.Assemble([halfArc,chord]);
+Assert(mixed.Complete && mixed.ClosedPaths.Count==1,"ARC + chord produce a closed topological path");
+Assert(mixed.ClosedPaths[0].Segments.Count==2,"Arc remains analytic, not flattened to LINE");
+var mixedSample=VirtualToolpath.Sample(mixed.ClosedPaths[0]);
+Assert(mixedSample.IsValidForPreview,"Mixed arc-line path can be sampled for display");
+Assert(Math.Abs(mixedSample.LengthMm-(10*Math.PI+20))<1e-6,
+       "Mixed contour length uses exact arc length");
+var reversed=MixedContourAssembler.Assemble([new DxfLine("CUT",new Point2(10,0),new Point2(-10,0)),halfArc]);
+Assert(reversed.Complete && reversed.ClosedPaths.Count==1,"Reverse traversal joins ARC");
+Assert(reversed.ClosedPaths[0].Segments.OfType<PreviewArc>().Any(a=>a.SweepDegrees<0),
+       "Reverse traversal retains exact CW arc geometry");
+Assert(VirtualToolpath.Sample(reversed.ClosedPaths[0]).IsValidForPreview,
+       "Signed preview sweep remains valid");
+// Composite DXF contour: an exact bulge arc joined with an independently stored LINE.
+var bulgedHalf = new DxfBulgedPolyline("CUT",
+    [new Point2(-10, 0), new Point2(10, 0)], [1, 0], false);
+var combinedBulgeAndLine = MixedContourAssembler.Assemble([
+    bulgedHalf, new DxfLine("CUT", new Point2(10, 0), new Point2(-10, 0))]);
+Assert(combinedBulgeAndLine.Complete && combinedBulgeAndLine.ClosedPaths.Count == 1,
+       "Bulge arc and independent DXF LINE assemble into one closed preview contour");
+Assert(combinedBulgeAndLine.ClosedPaths[0].Segments.OfType<PreviewArc>().Count() == 1,
+       "Bulge arc remains analytic after composite contour assembly");
+var bulgedLength = VirtualToolpath.Sample(combinedBulgeAndLine.ClosedPaths[0]);
+Assert(bulgedLength.IsValidForPreview &&
+       Math.Abs(bulgedLength.LengthMm - (10*Math.PI+20)) < 1e-6,
+       "Bulge and LINE closed preview uses true semicircular arc length");
+var bulgedClosed = MixedContourAssembler.Assemble([
+    new DxfBulgedPolyline("CUT",
+        [new Point2(-10, 0), new Point2(10, 0)], [1, 0], true)]);
+Assert(bulgedClosed.Complete && bulgedClosed.ClosedPaths.Count == 1,
+       "Closed bulged polyline is assembled without independent chord");
+var bulgeOpen = MixedContourAssembler.Assemble([bulgedHalf]);
+Assert(!bulgeOpen.Complete && bulgeOpen.Warnings.Count > 0,
+       "Open curved polyline cannot be mistaken for a closed cutting boundary");
+var bulgeBranch = MixedContourAssembler.Assemble([
+    bulgedHalf,
+    new DxfLine("CUT", new Point2(10, 0), new Point2(-10, 0)),
+    new DxfLine("CUT", new Point2(10, 0), new Point2(20, 0))]);
+Assert(!bulgeBranch.Complete && bulgeBranch.ClosedPaths.Count == 0,
+       "Branching composite polyline/LINE graph fails closed");
+var bulgeCrossing = MixedContourAssembler.Assemble([
+    bulgedHalf,
+    new DxfLine("CUT", new Point2(10, 0), new Point2(0, -12)),
+    new DxfLine("CUT", new Point2(0, -12), new Point2(-10, 0))]);
+Assert(!bulgeCrossing.Complete && bulgeCrossing.Warnings.Count > 0,
+       "Non-endpoint intersection in composite bulge/LINE ring is rejected");
+var curvedPreflight = GeometryPreflight.Inspect(
+    Document(bulgedHalf, new DxfLine("CUT",new Point2(10,0),new Point2(-10,0))),
+    new Sheet(100,100));
+Assert(curvedPreflight.Status == GeometryPreflightStatus.Rejected &&
+       !curvedPreflight.CanGenerateMachineCommands,
+       "Successful preview topology never authorizes cutting a bulge contour");
+
+// Analytic Green-theorem metrics, without sampling curves into polygon chords.
+var halfMetrics = PreviewContourMetrics.Measure(mixed.ClosedPaths[0]);
+Assert(halfMetrics.IsValid &&
+       Math.Abs(halfMetrics.AreaMm2 - Math.PI*50) < 1e-7 &&
+       Math.Abs(halfMetrics.PerimeterMm - (Math.PI*10 + 20)) < 1e-7,
+       "LINE/ARC half-disc has exact analytic area and circumference");
+Assert(!halfMetrics.CanStartMachine,
+       "Metrics are never a machine execution permit");
+var bulgeMetrics = PreviewContourMetrics.Measure(combinedBulgeAndLine.ClosedPaths[0]);
+Assert(bulgeMetrics.IsValid && Math.Abs(bulgeMetrics.AreaMm2 - Math.PI*50)<1e-7,
+       "Composite bulge/LINE area equals the analytic half-circle");
+var reversedSemidisc = new PreviewPath([
+    new PreviewLine(new PreviewPoint(10,0), new PreviewPoint(-10,0)),
+    new PreviewArc(new PreviewPoint(0,0),10,180,-180)
+], true);
+var reversedMetrics=PreviewContourMetrics.Measure(reversedSemidisc);
+Assert(reversedMetrics.IsValid && Math.Abs(reversedMetrics.SignedAreaMm2 + halfMetrics.SignedAreaMm2)<1e-7,
+       "Opposite traversal reverses signed area but preserves physical area");
+var rectangleMetrics=PreviewContourMetrics.Measure(new PreviewPath([
+    new PreviewLine(new PreviewPoint(0,0),new PreviewPoint(200,0)),
+    new PreviewLine(new PreviewPoint(200,0),new PreviewPoint(200,100)),
+    new PreviewLine(new PreviewPoint(200,100),new PreviewPoint(0,100)),
+    new PreviewLine(new PreviewPoint(0,100),new PreviewPoint(0,0))
+],true));
+Assert(rectangleMetrics.IsValid && rectangleMetrics.SignedAreaMm2==20000 &&
+       rectangleMetrics.PerimeterMm==600 && rectangleMetrics.Winding=="CCW",
+       "Exact rectangular area, perimeter and orientation");
+var displacedRing = new PreviewPath([
+    new PreviewLine(new PreviewPoint(1e9,1e9),new PreviewPoint(1e9+200,1e9)),
+    new PreviewLine(new PreviewPoint(1e9+200,1e9),new PreviewPoint(1e9+200,1e9+100)),
+    new PreviewLine(new PreviewPoint(1e9+200,1e9+100),new PreviewPoint(1e9,1e9+100)),
+    new PreviewLine(new PreviewPoint(1e9,1e9+100),new PreviewPoint(1e9,1e9))
+],true);
+Assert(PreviewContourMetrics.Measure(displacedRing).AreaMm2==20000,
+       "Local origin prevents area cancellation for large drawing coordinates");
+var openMetrics=PreviewContourMetrics.Measure(new PreviewPath([
+    new PreviewLine(new PreviewPoint(0,0),new PreviewPoint(10,0))
+],false));
+Assert(!openMetrics.IsValid && openMetrics.Issues.Count>0,
+       "Unclosed path cannot yield verified area");
+var crossingMetrics=PreviewContourMetrics.Measure(new PreviewPath([
+    new PreviewLine(new PreviewPoint(0,0),new PreviewPoint(10,10)),
+    new PreviewLine(new PreviewPoint(10,10),new PreviewPoint(0,10)),
+    new PreviewLine(new PreviewPoint(0,10),new PreviewPoint(10,0)),
+    new PreviewLine(new PreviewPoint(10,0),new PreviewPoint(0,0))
+],true));
+Assert(!crossingMetrics.IsValid, "Self-intersection rejects analytic area result");
+
+// B2 regression: independently simple rings can still cross or touch each other.
+static DxfLine[] BoxLines(double x1, double y1, double x2, double y2) =>
+[
+    new DxfLine("CUT", new Point2(x1,y1), new Point2(x2,y1)),
+    new DxfLine("CUT", new Point2(x2,y1), new Point2(x2,y2)),
+    new DxfLine("CUT", new Point2(x2,y2), new Point2(x1,y2)),
+    new DxfLine("CUT", new Point2(x1,y2), new Point2(x1,y1))
+];
+var independentBoxes = MixedContourAssembler.Assemble(
+    [..BoxLines(0,0,10,10), ..BoxLines(20,0,30,10)]);
+Assert(independentBoxes.Complete && independentBoxes.ClosedPaths.Count == 2,
+       "Separate disjoint contour rings remain previewable");
+var nestedBoxes = MixedContourAssembler.Assemble(
+    [..BoxLines(0,0,30,30), ..BoxLines(10,10,20,20)]);
+Assert(nestedBoxes.Complete && nestedBoxes.ClosedPaths.Count == 2,
+       "Strictly nested non-touching rings remain previewable, without hole certification");
+var crossingBoxes = MixedContourAssembler.Assemble(
+    [..BoxLines(0,0,20,20), ..BoxLines(10,-5,30,10)]);
+Assert(!crossingBoxes.Complete && crossingBoxes.ClosedPaths.Count == 0,
+       "Crossing distinct polygon rings fail the entire assembly");
+var tangentBoxes = MixedContourAssembler.Assemble(
+    [..BoxLines(0,0,10,10), ..BoxLines(10,10,20,20)]);
+Assert(!tangentBoxes.Complete,
+       "Distinct polygons touching at a shared point are rejected");
+var curvedOuterAndCrossingLine = MixedContourAssembler.Assemble([
+    new DxfArc("CUT",new Point2(0,0),10,0,180),
+    new DxfLine("CUT",new Point2(-10,0),new Point2(10,0)),
+    ..BoxLines(-2,5,2,12)
+]);
+Assert(!curvedOuterAndCrossingLine.Complete,
+       "Analytic ARC against a separate LINE contour detects crossing");
+Assert(!nestedBoxes.ClosedPaths.Any(p => PreviewContourMetrics.Measure(p).CanStartMachine),
+       "Pair inspection never grants equipment control");
+
+// Analytic ring nesting: signed Green areas and even/odd material islands.
+var topologyNested = PreviewContourTopology.Analyze(nestedBoxes.ClosedPaths);
+Assert(topologyNested.IsValid && topologyNested.Rings.Count==2 &&
+       Math.Abs(topologyNested.NetAreaMm2-800)<1e-7 &&
+       topologyNested.Rings.Count(r=>!r.IsMaterialBoundary)==1,
+       "Nested rectangles produce 900-100 = 800 square mm of material");
+var topologyDisjoint = PreviewContourTopology.Analyze(independentBoxes.ClosedPaths);
+Assert(topologyDisjoint.IsValid && Math.Abs(topologyDisjoint.NetAreaMm2-200)<1e-7,
+       "Independent nonoverlapping rings add their exact areas");
+var threeLevel = MixedContourAssembler.Assemble([
+    ..BoxLines(0,0,40,40), ..BoxLines(5,5,35,35), ..BoxLines(10,10,20,20)
+]);
+Assert(threeLevel.Complete, "Three-level closed contour assembly is valid for preview");
+var islandMetrics=PreviewContourTopology.Analyze(threeLevel.ClosedPaths);
+Assert(islandMetrics.IsValid &&
+       Math.Abs(islandMetrics.NetAreaMm2-(1600-900+100))<1e-7 &&
+       islandMetrics.Rings.Count(r=>r.IsMaterialBoundary)==2,
+       "Three-level inclusion alternates material, void and island");
+var topologyCrossing = PreviewContourTopology.Analyze([
+    new PreviewPath([new PreviewLine(new(0,0),new(20,0)),
+                     new PreviewLine(new(20,0),new(20,20)),
+                     new PreviewLine(new(20,20),new(0,20)),
+                     new PreviewLine(new(0,20),new(0,0))],true),
+    new PreviewPath([new PreviewLine(new(10,-5),new(30,-5)),
+                     new PreviewLine(new(30,-5),new(30,10)),
+                     new PreviewLine(new(30,10),new(10,10)),
+                     new PreviewLine(new(10,10),new(10,-5))],true)
+]);
+Assert(!topologyCrossing.IsValid && !topologyCrossing.CanStartMachine,
+       "Intersecting rings never yield net material area or equipment permission");
+Assert(!topologyNested.CanStartMachine, "Analytic net area cannot enable machine commands");
+
+// Exact CIRCLE support in read-only mixed topology, including nested round voids.
+var circleRings=MixedContourAssembler.Assemble([
+    new DxfCircle("CUT",new Point2(50,50),20),
+    new DxfCircle("CUT",new Point2(50,50),5)]);
+Assert(circleRings.Complete && circleRings.ClosedPaths.Count==2,
+       "Analytic CIRCLE entities form complete contour rings");
+var circleNesting=PreviewContourTopology.Analyze(circleRings.ClosedPaths);
+Assert(circleNesting.IsValid &&
+       Math.Abs(circleNesting.NetAreaMm2-Math.PI*(400-25))<1e-6,
+       "Circular outer contour and circular hole retain exact pi*r² areas");
+var touchingCircles=MixedContourAssembler.Assemble([
+    new DxfCircle("CUT",new Point2(0,0),10),
+    new DxfCircle("CUT",new Point2(20,0),10)]);
+Assert(!touchingCircles.Complete,
+       "Externally tangent circular boundaries rejected before CAD/CAM");
+
+var openMixed=MixedContourAssembler.Assemble([halfArc]);
+Assert(!openMixed.Complete,"ARC without chord is an open chain");
+var branchedMixed=MixedContourAssembler.Assemble([halfArc,chord,
+    new DxfLine("CUT",new Point2(10,0),new Point2(20,0))]);
+Assert(!branchedMixed.Complete,"Branching LINE/ARC endpoint is rejected");
+var brokenMixed=MixedContourAssembler.Assemble([halfArc,
+    new DxfLine("CUT",new Point2(-10,0),new Point2(10.2,0))]);
+Assert(!brokenMixed.Complete,"Too-large LINE/ARC gap rejected");
+var withinTolerance=MixedContourAssembler.Assemble([halfArc,
+    new DxfLine("CUT",new Point2(-10,0),new Point2(10.002,0))]);
+Assert(withinTolerance.Complete,"LINE/ARC endpoint inside tolerance accepted for inspection");
+var invalidSweep=MixedContourAssembler.Assemble([
+    new DxfArc("CUT",new Point2(0,0),10,0,720),chord]);
+Assert(!invalidSweep.Complete,"Multi-turn ARC rejected as ambiguous");
+
+
+var safeSemicircle = new PreviewPath([
+    new PreviewArc(new PreviewPoint(0,0),10,0,180),
+    new PreviewLine(new PreviewPoint(-10,0),new PreviewPoint(10,0))],true);
+Assert(PreviewContourValidator.Validate(safeSemicircle).Count==0,
+       "Semicircle and chord meet only at their shared endpoints");
+var crossingArcLine = new PreviewPath([
+    new PreviewArc(new PreviewPoint(0,0),10,0,180),
+    new PreviewLine(new PreviewPoint(-10,0),new PreviewPoint(10,0)),
+    new PreviewLine(new PreviewPoint(10,0),new PreviewPoint(0,20)),
+    new PreviewLine(new PreviewPoint(0,20),new PreviewPoint(10,0))],true);
+Assert(PreviewContourValidator.Validate(crossingArcLine).Count>0,
+       "Branching and repeated/overlapping line paths cannot be accepted");
+var arcAndChordCross = new PreviewPath([
+    new PreviewArc(new PreviewPoint(0,0),10,0,180),
+    new PreviewLine(new PreviewPoint(-10,0),new PreviewPoint(10,0)),
+    new PreviewLine(new PreviewPoint(10,0),new PreviewPoint(0,20)),
+    new PreviewLine(new PreviewPoint(0,20),new PreviewPoint(10,0))],true);
+Assert(PreviewContourValidator.Validate(arcAndChordCross).Count>0,
+       "Nonadjacent LINE/ARC touching cannot be approved");
+var twoArcCross = new PreviewPath([
+    new PreviewArc(new PreviewPoint(0,0),10,0,180),
+    new PreviewLine(new PreviewPoint(-10,0),new PreviewPoint(10,0))],true);
+Assert(PreviewContourValidator.Validate(twoArcCross).Count==0,"Simple arc geometry still accepted");
+var intersectingAnalytic=MixedContourAssembler.Assemble([
+    new DxfArc("CUT",new Point2(0,0),10,0,180),
+    new DxfLine("CUT",new Point2(-10,0),new Point2(10,0)),
+    new DxfLine("CUT",new Point2(10,0),new Point2(0,20)),
+    new DxfLine("CUT",new Point2(0,20),new Point2(10,0))
+]);
+Assert(!intersectingAnalytic.Complete,"Invalid mixed contour graph is rejected");
+
+
+var genuineLineArcCrossing = MixedContourAssembler.Assemble([
+    new DxfArc("CUT",new Point2(0,0),10,0,180),
+    new DxfLine("CUT",new Point2(-10,0),new Point2(0,12)),
+    new DxfLine("CUT",new Point2(0,12),new Point2(10,0))
+]);
+Assert(!genuineLineArcCrossing.Complete &&
+       genuineLineArcCrossing.Warnings.Any(w=>w.Contains("intersection",StringComparison.OrdinalIgnoreCase)),
+       "Non-endpoint LINE/ARC intersections rejected analytically");
+var touchedArc = MixedContourAssembler.Assemble([
+    new DxfArc("CUT",new Point2(0,0),10,0,180),
+    new DxfLine("CUT",new Point2(-10,0),new Point2(0,10)),
+    new DxfLine("CUT",new Point2(0,10),new Point2(10,0))
+]);
+Assert(!touchedArc.Complete,"Touching the interior of an ARC is rejected");
+
+
+var preflightGood=GeometryPreflight.Inspect(
+    Document(rectangle,innerHole,circleHole),new Sheet(300,200),0);
+Assert(preflightGood.Status==GeometryPreflightStatus.ReadyForCamReview,
+    "Verified polygon and holes pass only geometric preflight");
+Assert(preflightGood.Profiles.Count==1 && preflightGood.BlockingIssues.Count==0,
+    "Safe subset produces one profile");
+Assert(!preflightGood.CanGenerateMachineCommands,
+    "Geometric preflight NEVER grants machine execution");
+var preflightUnknown=GeometryPreflight.Inspect(
+    new DxfImportResult([rectangle],[],null),new Sheet(300,200));
+Assert(preflightUnknown.Status==GeometryPreflightStatus.Rejected,
+    "Unconfirmed units fail closed");
+var preflightArc=GeometryPreflight.Inspect(
+    Document(rectangle,new DxfArc("CUT",new Point2(30,30),10,0,90)),new Sheet(300,200));
+Assert(preflightArc.Status==GeometryPreflightStatus.Rejected,
+    "Unsupported arc cannot be silently omitted");
+var preflightOpen=GeometryPreflight.Inspect(
+    Document(rectangle,new DxfPolyline("CUT",[new Point2(0,0),new Point2(1,1)],false)),
+    new Sheet(300,200));
+Assert(preflightOpen.Status==GeometryPreflightStatus.Rejected,
+    "Open DXF contour blocks preflight");
+var preflightTooLarge=GeometryPreflight.Inspect(
+    Document(rectangle),new Sheet(150,150));
+Assert(preflightTooLarge.Status==GeometryPreflightStatus.Rejected,
+    "Outside sheet boundary rejected");
+var preflightMargin=GeometryPreflight.Inspect(
+    Document(rectangle),new Sheet(300,200),10);
+Assert(preflightMargin.Status==GeometryPreflightStatus.Rejected,
+    "Sheet edge touching margin rejected");
+var preflightIntersect=GeometryPreflight.Inspect(
+    Document(rectangle,
+        Closed("CUT",new Point2(100,50),new Point2(250,50),
+            new Point2(250,150),new Point2(100,150))),
+    new Sheet(400,300));
+Assert(preflightIntersect.Status==GeometryPreflightStatus.Rejected,
+    "Intersecting profiles block preflight");
+var preflightWarnings=GeometryPreflight.Inspect(
+    new DxfImportResult([rectangle],["Unsupported entity SPLINE skipped"],4),new Sheet(300,200));
+Assert(preflightWarnings.Status==GeometryPreflightStatus.Rejected,
+    "Importer warnings block preflight");
+var preflightNoParts=GeometryPreflight.Inspect(
+    Document(),new Sheet(300,200));
+Assert(preflightNoParts.Status==GeometryPreflightStatus.Rejected,
+    "Empty drawing cannot pass");
+var preflightNaN=GeometryPreflight.Inspect(
+    Document(Closed("CUT",new Point2(double.NaN,0),new Point2(100,0),new Point2(100,100))),
+    new Sheet(300,200));
+Assert(preflightNaN.Status==GeometryPreflightStatus.Rejected,
+    "Non-finite coordinate cannot pass");
+
+
+var plannedGeometry=GeometryPreflight.Inspect(
+    Document(rectangle,innerHole,circleHole),new Sheet(300,200));
+var plan=PreviewCutPlanner.Plan(plannedGeometry);
+Assert(plan.BlockingIssues.Count==0 && plan.Operations.Count==3,"Cut preview has polygon hole, round hole and outer contour");
+Assert(plan.Operations[0].Kind==PreviewCutKind.InnerPolygon &&
+       plan.Operations[1].Kind==PreviewCutKind.CircularHole &&
+       plan.Operations[2].Kind==PreviewCutKind.OuterBoundary,
+       "All holes precede outside cut");
+Assert(plan.Operations[1].SuggestedPiercePoint==new Point2(100,50),
+       "Round-hole preview suggests waste-side center");
+Assert(plan.Operations[1].SuggestedBoundaryEntry==new Point2(110,50),
+       "Round-hole candidate boundary entry");
+Assert(plan.Operations.All(o=>o.RequiresCamValidation)&&!plan.CanStartMachine,
+       "Preview never authorizes physical cutting");
+var blockedPlan=PreviewCutPlanner.Plan(preflightArc);
+Assert(blockedPlan.Operations.Count==0 && blockedPlan.BlockingIssues.Count>0,
+       "Unverified geometry never generates partial plan");
+var tooSmallHole=PreviewCutPlanner.Plan(plannedGeometry,minimumHoleRadiusMm:12);
+Assert(tooSmallHole.Operations.Count==0 && tooSmallHole.BlockingIssues.Count>0,
+       "Too-small hole blocks complete preview plan");
+
+var workspace = WorkspaceGeometry.Default;
+Assert(workspace.Validate().Count == 0, "Default table and material sheet are compatible");
+var customWorkspace = new WorkspaceGeometry(new Sheet(2500, 1300), new Sheet(2400, 1200));
+Assert(customWorkspace.Validate().Count == 0, "Independent valid sheet and table dimensions accepted");
+Assert(new WorkspaceGeometry(new Sheet(1000, 1000), new Sheet(1500, 900)).Validate().Count > 0,
+       "Material sheet exceeding table rejected");
+Assert(new WorkspaceGeometry(new Sheet(double.NaN, 1000), new Sheet(800, 800)).Validate().Count > 0,
+       "Non-finite table dimensions rejected");
+
+var vm = VirtualMachine.Create(customWorkspace);
+Assert(vm.Checkpoints.Count == 4, "Four material sheet reference points exist");
+Assert(vm.Checkpoints[2].Position.X == 2400 && vm.Checkpoints[2].Position.Y == 1200,
+       "Sheet reference points match sheet rather than machine table");
+vm = vm.MoveVirtual(new MachinePoint(50, 80, 10));
+Assert(vm.MachineCoordinates.X == 50, "Virtual machine absolute X updates");
+vm = vm.SetWorkZeroAtHead();
+Assert(vm.WorkCoordinates == new MachinePoint(0, 0, 0), "Working zero established at current virtual head");
+vm = vm.MoveVirtual(new MachinePoint(55, 70, 12));
+Assert(vm.WorkCoordinates == new MachinePoint(5, -10, 2), "Relative work XYZ tracks offset");
+var invalidHeadRejected = false;
+try { vm.MoveVirtual(new MachinePoint(2600, 70, 12)); }
+catch (ArgumentOutOfRangeException) { invalidHeadRejected = true; }
+Assert(invalidHeadRejected, "Virtual head outside machine table rejected");
+
+var semicircleBulge = new DxfBulgedPolyline("CUT",
+    [new Point2(-10, 0), new Point2(10, 0)], [1, 0], false);
+var semicircleSegments = DxfBulgePreview.Build(semicircleBulge);
+Assert(semicircleSegments.Segments[0] is PreviewArc { RadiusMm: > 9.999 and < 10.001 },
+       "Bulge=1 is an exact semicircular arc with radius 10");
+var semicirclePreview = VirtualToolpath.Sample(semicircleSegments);
+Assert(semicirclePreview.IsValidForPreview && Math.Abs(semicirclePreview.LengthMm - 10 * Math.PI) < 1e-7,
+       "Bulged semicircle preview matches analytic arc length");
+var clockwiseBulge = new DxfBulgedPolyline("CUT",
+    [new Point2(-10, 0), new Point2(10, 0)], [-1, 0], false);
+Assert(DxfBulgePreview.Build(clockwiseBulge).Segments[0] is PreviewArc { SweepDegrees: < 0 },
+       "Negative bulge preserves clockwise arc direction");
+var invalidBulgeRejected = false;
+try { DxfBulgePreview.Build(new DxfBulgedPolyline("CUT",
+    [new Point2(0, 0), new Point2(0, 0)], [1, 0], false)); }
+catch (ArgumentException) { invalidBulgeRejected = true; }
+Assert(invalidBulgeRejected, "Zero-length bulge chord rejected");
+
+
+// Decoding different ASCII DXF revisions and explicitly declared legacy code pages.
+var revisionFixture = string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER",
+    "9","$ACADVER","1","AC1015",
+    "9","$DWGCODEPAGE","3","ANSI_1251",
+    "9","$INSUNITS","70","4",
+    "0","ENDSEC","0","SECTION","2","ENTITIES",
+    "0","LINE","8","Деталь","10","0","20","0","11","100","21","50",
+    "0","ENDSEC","0","EOF"
+});
+DxfFileReader.Read(System.Text.Encoding.UTF8.GetBytes(dxf));
+var windows1251Bytes = System.Text.Encoding.GetEncoding(1251).GetBytes(revisionFixture);
+var decoded1251 = DxfFileReader.Read(windows1251Bytes);
+Assert(decoded1251.AcadVersion == "AC1015" && decoded1251.EncodingName == "ANSI_1251",
+       "R2000 revision and declared Windows-1251 code page identified");
+Assert(decoded1251.Document.Shapes.Single() is DxfLine { Layer: "Деталь" },
+       "Cyrillic layer survives Windows-1251 decoding");
+Assert(decoded1251.Document.Warnings.Count == 0, "Declared and known revision/code page has no decoding warnings");
+
+var utf8Version = revisionFixture.Replace("ANSI_1251", "UTF-8").Replace("AC1015", "AC1032");
+var decodedUtf8 = DxfFileReader.Read(System.Text.Encoding.UTF8.GetBytes(utf8Version));
+Assert(decodedUtf8.AcadVersion == "AC1032" && decodedUtf8.Document.Warnings.Count == 0,
+       "R2018-style revision with UTF-8 data decoded without lossy replacement");
+
+var bomBytes = new byte[] { 0xef, 0xbb, 0xbf }
+    .Concat(System.Text.Encoding.UTF8.GetBytes(utf8Version)).ToArray();
+Assert(DxfFileReader.Read(bomBytes).Document.Shapes.Count == 1, "UTF-8 BOM accepted");
+
+var utf16Bytes = new byte[] { 0xff, 0xfe }
+    .Concat(System.Text.Encoding.Unicode.GetBytes(utf8Version.Replace("UTF-8", "UTF-16"))).ToArray();
+Assert(DxfFileReader.Read(utf16Bytes).Document.Shapes.Count == 1, "UTF-16 LE BOM decoded");
+
+var unknownRevision = DxfFileReader.Read(System.Text.Encoding.UTF8.GetBytes(utf8Version.Replace("AC1032","AC9999")));
+Assert(unknownRevision.Document.Warnings.Any(w => w.Contains("Unknown $ACADVER")),
+       "Unknown revision flagged for geometric review");
+Assert(GeometryPreflight.Inspect(unknownRevision.Document, new Sheet(500,500)).Status == GeometryPreflightStatus.Rejected,
+       "Unverified DXF revision never passes preflight");
+
+static bool RejectDxfBytes(byte[] file)
+{
+    try { DxfFileReader.Read(file); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectDxfBytes(System.Text.Encoding.ASCII.GetBytes("AutoCAD Binary DXF\r\n")),
+       "Binary DXF format rejected");
+Assert(RejectDxfBytes(System.Text.Encoding.ASCII.GetBytes(
+    revisionFixture.Replace("ANSI_1251", "ANSI_9999"))),
+       "Unknown legacy code page rejected");
+Assert(RejectDxfBytes(new byte[]{ 0xff, 0xfe, 0x00 }),
+       "Malformed UTF-16 input rejected");
+Assert(RejectDxfBytes(new byte[]{ 0xc3, 0x28 }),
+       "Undeclared invalid UTF-8 rejected without replacement characters");
+
+// DXF must not silently flatten genuinely 3D or wide entities into cutting contours.
+var zLineDxf=revisionFixture.Replace("21\n50","21\n50\n31\n5");
+var zLineRead=DxfReader.Parse(zLineDxf);
+Assert(zLineRead.Shapes.Count==0 &&
+       zLineRead.Warnings.Any(w=>w.Contains("elevation/extrusion")),
+       "Nonzero LINE Z is rejected rather than silently projected to 2D");
+var widePolylineDxf=string.Join("\n",new[]{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4",
+    "0","ENDSEC","0","SECTION","2","ENTITIES",
+    "0","LWPOLYLINE","8","CUT","90","3","70","1",
+    "10","0","20","0","40","2",
+    "10","10","20","0","10","10","20","10",
+    "0","ENDSEC","0","EOF"
+});
+var wideRead=DxfReader.Parse(widePolylineDxf);
+Assert(wideRead.Shapes.Count==0 && wideRead.Warnings.Count>0,
+       "Nonzero LWPOLYLINE width rejected until explicit CAD width support exists");
+
+// R12 uses POLYLINE/VERTEX/SEQEND instead of LWPOLYLINE.
+var r12Polyline=string.Join("\n",new[]{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4",
+    "0","ENDSEC","0","SECTION","2","ENTITIES",
+    "0","POLYLINE","8","CUT","70","1",
+    "0","VERTEX","10","0","20","0",
+    "0","VERTEX","10","100","20","0",
+    "0","VERTEX","10","100","20","50",
+    "0","VERTEX","10","0","20","50",
+    "0","SEQEND","0","ENDSEC","0","EOF"
+});
+var r12Shape=DxfReader.Parse(r12Polyline);
+Assert(r12Shape.Shapes.Single() is DxfPolyline { Closed:true } &&
+       r12Shape.Warnings.Count==0,
+       "Legacy R12 2D POLYLINE/VERTEX imported without losing vertices");
+var r12Bulged=DxfReader.Parse(r12Polyline.Replace(
+    "10\n0\n20\n0", "10\n0\n20\n0\n42\n0.25"));
+Assert(r12Bulged.Shapes.Single() is DxfBulgedPolyline &&
+       r12Bulged.Warnings.Any(w=>w.Contains("preview-only")),
+       "Legacy R12 bulge preserved analytically but excluded from CAM");
+var r12MissingEnd=DxfReader.Parse(r12Polyline.Replace(
+    "0\nSEQEND\n", ""));
+Assert(r12MissingEnd.Warnings.Any(w=>w.Contains("Unterminated")),
+       "Legacy R12 POLYLINE without SEQEND fails closed");
+var r12ThreeD=DxfReader.Parse(r12Polyline.Replace(
+    "0\nVERTEX\n10\n100\n20\n0",
+    "0\nVERTEX\n10\n100\n20\n0\n30\n5"));
+Assert(r12ThreeD.Warnings.Count>0,
+       "3D legacy VERTEX cannot be projected as a valid 2D contour");
+
+// Deterministic numerical regression across translations and nesting scales.
+// These are synthetic oracle checks, not a substitute for external industrial DXF.
+for (int caseNo=1;caseNo<=128;caseNo++)
+{
+    double originX=(caseNo%2==0?1:-1)*(caseNo*1000.0);
+    double originY=caseNo*12.5;
+    double side=20+caseNo*0.25;
+    double margin=side*0.2;
+    var translated=MixedContourAssembler.Assemble([
+        ..BoxLines(originX,originY,originX+side,originY+side),
+        ..BoxLines(originX+margin,originY+margin,
+                   originX+side-margin,originY+side-margin)
+    ]);
+    Assert(translated.Complete && translated.ClosedPaths.Count==2,
+           $"Synthetic ring assembly case {caseNo}");
+    var measured=PreviewContourTopology.Analyze(translated.ClosedPaths);
+    double expected=side*side-(side-2*margin)*(side-2*margin);
+    Assert(measured.IsValid &&
+           Math.Abs(measured.NetAreaMm2-expected)<=Math.Max(1e-7,expected*1e-9),
+           $"Synthetic translated net area case {caseNo}");
+}
+// Licensed external DXF files from the CADCraft Corpus (not production blueprints).
+foreach(var name in new[]{"cadcraft-sample-bracket.dxf","cadcraft-sample-floorplan.dxf"})
+{
+    var fixturePath=Path.Combine("tests","fixtures",name);
+    var bytes=File.ReadAllBytes(fixturePath);
+    var importedRealFile=DxfFileReader.Read(bytes);
+    Assert(importedRealFile.AcadVersion=="AC1032" &&
+           importedRealFile.Document.InsUnits==1,
+           $"External R2018 DXF fixture {name} preserves inch units");
+    Assert(importedRealFile.Document.Shapes.Count>0 &&
+           importedRealFile.Document.Warnings.Count>0,
+           $"External DXF {name} exposes supported entities and warnings");
+    var fixtureGate=GeometryPreflight.Inspect(importedRealFile.Document,
+        new Sheet(1000,1000));
+    Assert(fixtureGate.Status==GeometryPreflightStatus.Rejected &&
+           !fixtureGate.CanGenerateMachineCommands,
+           $"External DXF {name} refuses unconfirmed millimetre CAM geometry");
+}
+// Explicit scale conversion never guesses missing/contradictory DXF units.
+var imperialDocument=new DxfImportResult([
+    new DxfLine("CUT",new Point2(1,2),new Point2(3,4)),
+    new DxfCircle("CUT",new Point2(2,2),0.5)
+],["DXF $INSUNITS=1. Only millimetres (4) may be used in cutting jobs without conversion."],1);
+var convertedInch=DxfUnitConverter.ToMillimetres(imperialDocument,1);
+Assert(convertedInch.Document.InsUnits==4 &&
+       convertedInch.Document.Warnings.Count==0 &&
+       Math.Abs(((DxfLine)convertedInch.Document.Shapes[0]).Start.X-25.4)<1e-10 &&
+       Math.Abs(((DxfCircle)convertedInch.Document.Shapes[1]).Radius-12.7)<1e-10 &&
+       !convertedInch.CanStartMachine,
+       "Explicit inch-to-mm scaling preserves analytic LINE and CIRCLE dimensions");
+bool mismatchThrows=false;
+try { DxfUnitConverter.ToMillimetres(imperialDocument,4); }
+catch (FormatException) { mismatchThrows=true; }
+Assert(mismatchThrows,"Incorrect source-unit confirmation is rejected");
+bool unspecifiedThrows=false;
+try { DxfUnitConverter.ToMillimetres(
+    new DxfImportResult(imperialDocument.Shapes,[],0),0); }
+catch (FormatException) { unspecifiedThrows=true; }
+Assert(unspecifiedThrows,"Unspecified DXF source units cannot be scaled by guessing");
+var retainedWarnings=DxfUnitConverter.ToMillimetres(
+    imperialDocument with { Warnings=[
+        "DXF $INSUNITS=1. Only millimetres (4) may be used in cutting jobs without conversion.",
+        "Unsupported entity HATCH skipped"]},1);
+Assert(retainedWarnings.Document.Warnings.Count==1 &&
+       retainedWarnings.Document.Warnings[0].Contains("HATCH"),
+       "Unit conversion never discards unsupported entity warnings");
+// Configurable tolerances must affect endpoint joining without accepting crossings.
+var toleranceArc=new DxfArc("CUT",new Point2(0,0),10,0,180);
+var almostChord=new DxfLine("CUT",new Point2(-10,0),new Point2(10.004,0));
+var strictJoin=MixedContourAssembler.Assemble([toleranceArc,almostChord],0.001);
+var looseJoin=MixedContourAssembler.Assemble([toleranceArc,almostChord],0.01);
+Assert(!strictJoin.Complete && looseJoin.Complete,
+       "User-selected DXF tolerance controls endpoint assembly without editing the file");
+var looseCrossing=MixedContourAssembler.Assemble([
+    ..BoxLines(0,0,20,20), ..BoxLines(10,-5,30,10)],0.5);
+Assert(!looseCrossing.Complete,
+       "Maximum permitted topology tolerance cannot allow intersecting boundaries");
+bool invalidToleranceRejected=false;
+try { MixedContourAssembler.Assemble([toleranceArc,almostChord],double.NaN); }
+catch (ArgumentOutOfRangeException) { invalidToleranceRejected=true; }
+Assert(invalidToleranceRejected,"Nonfinite DXF tolerance fails closed");
+
+// Analytic dimensional bounds: arc apexes cannot be missed by endpoint-only boxes.
+var semicircleBounds=PreviewContourBounds.Measure(safeSemicircle);
+Assert(semicircleBounds.IsValid &&
+       Math.Abs(semicircleBounds.MinX+10)<1e-8 &&
+       Math.Abs(semicircleBounds.MaxX-10)<1e-8 &&
+       Math.Abs(semicircleBounds.MinY)<1e-8 &&
+       Math.Abs(semicircleBounds.MaxY-10)<1e-8,
+       "Analytic semicircle bounds include the arc apex");
+var circularBounds=PreviewContourBounds.Measure(circleRings.ClosedPaths[0]);
+Assert(circularBounds.IsValid &&
+       Math.Abs(circularBounds.WidthMm-40)<1e-7 &&
+       Math.Abs(circularBounds.HeightMm-40)<1e-7 &&
+       !circularBounds.CanStartMachine,
+       "Four exact quarter arcs recover full circular dimensions");
+var majorArcBounds=PreviewContourBounds.Measure(new PreviewPath([
+    new PreviewArc(new PreviewPoint(100,100),20,330,300)],false));
+Assert(majorArcBounds.IsValid &&
+       Math.Abs(majorArcBounds.MinX-80)<1e-7 &&
+       Math.Abs(majorArcBounds.MaxX-120)<1e-7 &&
+       Math.Abs(majorArcBounds.MinY-80)<1e-7,
+       "Major sweep includes all appropriate cardinal extrema");
+Assert(!PreviewContourBounds.Measure(new PreviewPath([
+    new PreviewArc(new PreviewPoint(0,0),double.NaN,0,90)],false)).IsValid,
+    "Invalid circle data cannot yield misleading CAD dimensions");
+
+// Geometry-preserving CAD inspection transformations, without CAM permission.
+var translatedSemicircle=PreviewContourTransform.Move(safeSemicircle,100,200);
+var translatedMetrics=PreviewContourMetrics.Measure(translatedSemicircle);
+var translatedBounds=PreviewContourBounds.Measure(translatedSemicircle);
+Assert(translatedMetrics.IsValid &&
+       Math.Abs(translatedMetrics.AreaMm2-halfMetrics.AreaMm2)<1e-7 &&
+       Math.Abs(translatedMetrics.PerimeterMm-halfMetrics.PerimeterMm)<1e-7 &&
+       Math.Abs(translatedBounds.MinX-90)<1e-7 &&
+       Math.Abs(translatedBounds.MaxY-210)<1e-7,
+       "Translation preserves exact analytic area and arc perimeter");
+var rotatedSemicircle=PreviewContourTransform.Rotate(safeSemicircle,new PreviewPoint(0,0),90);
+var rotatedMetrics=PreviewContourMetrics.Measure(rotatedSemicircle);
+var rotatedBounds=PreviewContourBounds.Measure(rotatedSemicircle);
+Assert(rotatedMetrics.IsValid &&
+       Math.Abs(rotatedMetrics.AreaMm2-halfMetrics.AreaMm2)<1e-7 &&
+       Math.Abs(rotatedBounds.MinX+10)<1e-7 &&
+       Math.Abs(rotatedBounds.MaxY-10)<1e-7,
+       "Quarter-turn retains analytic semicircular geometry");
+Assert(rotatedSemicircle.Segments.OfType<PreviewArc>().Count()==1 &&
+       !rotatedMetrics.CanStartMachine,
+       "CAD transform retains ARC segment without authorizing equipment control");
+bool invalidTransform=false;
+try { PreviewContourTransform.Move(safeSemicircle,double.PositiveInfinity,0); }
+catch (FormatException) { invalidTransform=true; }
+Assert(invalidTransform,"Nonfinite CAD transform rejected");
+
+// Text-defined 2D sketch and parametric 3D extrusion share exact dimensions.
+var textPlate=TextPlateSketch.Parse("PLATE 200 100 5; HOLE 50 50 10; HOLE 150 50 10");
+double plateArea=20000-2*Math.PI*100;
+Assert(textPlate.Drawing2D.Shapes.Count==6 &&
+       Math.Abs(textPlate.NetAreaMm2-plateArea)<1e-7 &&
+       Math.Abs(textPlate.VolumeMm3-plateArea*5)<1e-7 &&
+       !textPlate.CanStartMachine && !textPlate.IsManufacturingValidated,
+       "2D rectangle and holes match parametric 3D extrusion volume");
+var plateAssembly=MixedContourAssembler.Assemble(textPlate.Drawing2D.Shapes);
+Assert(plateAssembly.Complete && plateAssembly.ClosedPaths.Count==3,
+       "Text plate uses the same analytical DXF contour assembly as file import");
+var plateTopology=PreviewContourTopology.Analyze(plateAssembly.ClosedPaths);
+Assert(plateTopology.IsValid &&
+       Math.Abs(plateTopology.NetAreaMm2-textPlate.NetAreaMm2)<1e-6,
+       "Independent analytical ring topology agrees with text plate area");
+Assert(GeometryPreflight.Inspect(textPlate.Drawing2D,new Sheet(200,100)).Status ==
+       GeometryPreflightStatus.ReadyForCamReview,
+       "Text plate's simple verified 2D subset passes geometry-only preflight");
+static bool RejectPlate(string value)
+{
+    try { TextPlateSketch.Parse(value);return false; }
+    catch(FormatException) {return true;}
+}
+Assert(RejectPlate("PLATE 200 100 5; HOLE 10 10 10"),
+       "Hole tangent to plate edge rejected");
+Assert(RejectPlate("PLATE 200 100 5; HOLE 50 50 10; HOLE 70 50 10"),
+       "Two externally tangent holes rejected");
+Assert(RejectPlate("PLATE NaN 100 5") &&
+       RejectPlate("PLATE 200 100 5; HOLE 50 50 -2") &&
+       RejectPlate("PLATE 200 100 5; UNSUPPORTED 20 30 2"),
+       "Malformed, nonfinite, negative and unsupported text geometry rejected");
+
+// Restricted editable geometry DXF round trip: transformed LINE/ARC remains analytic.
+var movedRoundTripSource=PreviewContourTransform.Move(safeSemicircle,60,75);
+var movedText=PreviewDxfExporter.Export([movedRoundTripSource]);
+var movedDocument=DxfReader.Parse(movedText);
+Assert(movedDocument.InsUnits==4 && movedDocument.Warnings.Count==0 &&
+       movedDocument.Shapes.Count==2,
+       "DXF exporter emits supported millimetre LINE/ARC entities");
+var movedReimport=MixedContourAssembler.Assemble(movedDocument.Shapes);
+Assert(movedReimport.Complete && movedReimport.ClosedPaths.Count==1,
+       "Exported semicircular ring reopens as a closed analytic contour");
+var movedReimportArea=PreviewContourMetrics.Measure(movedReimport.ClosedPaths[0]);
+Assert(movedReimportArea.IsValid &&
+       Math.Abs(movedReimportArea.AreaMm2-halfMetrics.AreaMm2)<1e-6,
+       "DXF round trip preserves exact semicircular area");
+var clockwiseExport=PreviewDxfExporter.Export([reversedSemidisc]);
+var clockwiseParsed=MixedContourAssembler.Assemble(DxfReader.Parse(clockwiseExport).Shapes);
+Assert(clockwiseParsed.Complete &&
+       Math.Abs(PreviewContourMetrics.Measure(clockwiseParsed.ClosedPaths[0]).AreaMm2-
+                halfMetrics.AreaMm2)<1e-6,
+       "Clockwise arcs round-trip through DXF's counterclockwise ARC encoding");
+var holesExport=PreviewDxfExporter.Export(circleRings.ClosedPaths);
+var holesReimport=MixedContourAssembler.Assemble(DxfReader.Parse(holesExport).Shapes);
+Assert(holesReimport.Complete &&
+       Math.Abs(PreviewContourTopology.Analyze(holesReimport.ClosedPaths).NetAreaMm2-
+                circleNesting.NetAreaMm2)<1e-6,
+       "Nested circular rings survive DXF serialization without flattened arcs");
+bool rejectedBadExport=false;
+try { PreviewDxfExporter.Export([
+    new PreviewPath([new PreviewLine(new(0,0),new(5,0))],false)
+]); }
+catch(FormatException) { rejectedBadExport=true; }
+Assert(rejectedBadExport,"Open geometries cannot be exported as verified closed CAD");
+bool rejectedIntersectingExport=false;
+try { PreviewDxfExporter.Export(topologyCrossing.Rings.Count==0
+    ? [new PreviewPath([
+        new PreviewLine(new(0,0),new(10,10)),
+        new PreviewLine(new(10,10),new(0,10)),
+        new PreviewLine(new(0,10),new(10,0)),
+        new PreviewLine(new(10,0),new(0,0))],true)]
+    : []); }
+catch(FormatException) { rejectedIntersectingExport=true; }
+Assert(rejectedIntersectingExport, "Self-intersecting DXF geometry is refused");
+
+// Straight closed LWPOLYLINE is exported through exact line geometry.
+var polyForExport=new DxfPolyline("CUT",
+    [new Point2(0,0),new Point2(80,0),
+     new Point2(80,40),new Point2(0,40)],true);
+var assembledPoly=MixedContourAssembler.Assemble([polyForExport]);
+Assert(assembledPoly.Complete && assembledPoly.ClosedPaths.Count==1,
+       "Closed straight LWPOLYLINE joins as a verified preview ring");
+var exportedPoly=PreviewDxfExporter.Export(assembledPoly.ClosedPaths);
+var reassembledPoly=MixedContourAssembler.Assemble(DxfReader.Parse(exportedPoly).Shapes);
+Assert(reassembledPoly.Complete && reassembledPoly.ClosedPaths.Count==1 &&
+       Math.Abs(PreviewContourMetrics.Measure(reassembledPoly.ClosedPaths[0]).AreaMm2-3200)<1e-7,
+       "LWPOLYLINE exports as a valid closed LINE ring with preserved area");
+Assert(!MixedContourAssembler.Assemble([polyForExport with { Closed=false }]).Complete,
+       "Open LWPOLYLINE is rejected for editable contour export");
+Assert(!MixedContourAssembler.Assemble([new DxfPolyline("CUT",
+    [new Point2(0,0),new Point2(80,0),new Point2(80,0),new Point2(0,40)],true)]).Complete,
+       "Zero-length edges in LWPOLYLINE are rejected");
+
+// Bulge preview notices permit geometry-only export, never a CAM approval.
+var safeBulgeDocument = new DxfImportResult([bulgedHalf,chord],
+    ["Bulged LWPOLYLINE is preview-only: CAD/CAM geometry is not yet certified."],4);
+var safeBulgePaths=PreviewDxfExporter.ValidateDocument(safeBulgeDocument);
+Assert(safeBulgePaths.Count==1 &&
+       Math.Abs(PreviewContourMetrics.Measure(safeBulgePaths[0]).AreaMm2-50*Math.PI)<1e-6,
+       "Known bulge preview notice does not prevent verified geometry-only export");
+var safeBulgeReimport=MixedContourAssembler.Assemble(
+    DxfReader.Parse(PreviewDxfExporter.Export(safeBulgePaths)).Shapes);
+Assert(safeBulgeReimport.Complete &&
+       Math.Abs(PreviewContourMetrics.Measure(safeBulgeReimport.ClosedPaths[0]).AreaMm2-
+                50*Math.PI)<1e-6,
+       "Bulge converts to true ARC with preserved analytic area on reimport");
+bool unsupportedWarningBlocked=false;
+try { PreviewDxfExporter.ValidateDocument(safeBulgeDocument with
+    { Warnings=["Unsupported entity SPLINE skipped"] }); }
+catch(FormatException) { unsupportedWarningBlocked=true; }
+Assert(unsupportedWarningBlocked,
+       "Unknown or skipped DXF entities block edited drawing export");
+bool unknownUnitBlocked=false;
+try { PreviewDxfExporter.ValidateDocument(safeBulgeDocument with { InsUnits=0 }); }
+catch(FormatException) { unknownUnitBlocked=true; }
+Assert(unknownUnitBlocked,
+       "Unconfirmed units block edited drawing export even with valid contour");
+
+// B2 CAD drafting: relocate a single LINE vertex, not the entire shape.
+var editSquare=new PreviewPath([
+    new PreviewLine(new(0,0),new(10,0)),
+    new PreviewLine(new(10,0),new(10,10)),
+    new PreviewLine(new(10,10),new(0,10)),
+    new PreviewLine(new(0,10),new(0,0))
+],true);
+var movedVertex=PreviewVertexEditor.MoveVertex(
+    [editSquare],0,1,new PreviewPoint(12,0));
+Assert(movedVertex.IsValidForPreview && !movedVertex.CanStartMachine &&
+       Math.Abs(movedVertex.NetAreaMm2-110)<1e-8,
+       "Moving one polygon vertex changes area without changing other vertices");
+var firstEditedLine=(PreviewLine)movedVertex.Rings[0].Segments[0];
+var secondEditedLine=(PreviewLine)movedVertex.Rings[0].Segments[1];
+Assert(firstEditedLine.End==new PreviewPoint(12,0) &&
+       secondEditedLine.Start==new PreviewPoint(12,0) &&
+       firstEditedLine.Start==new PreviewPoint(0,0),
+       "Both adjacent edges share the edited vertex exactly");
+var savedVertexText=PreviewDxfExporter.Export(movedVertex.Rings);
+var reopenedVertex=MixedContourAssembler.Assemble(DxfReader.Parse(savedVertexText).Shapes);
+Assert(reopenedVertex.Complete &&
+       Math.Abs(PreviewContourMetrics.Measure(reopenedVertex.ClosedPaths[0]).AreaMm2-110)<1e-7,
+       "Single-vertex edit survives DXF export and reimport");
+static bool RejectVertexEdit(IReadOnlyList<PreviewPath> paths,
+    int ring, int vertex,PreviewPoint target)
+{
+    try { PreviewVertexEditor.MoveVertex(paths,ring,vertex,target);return false; }
+    catch(FormatException) {return true; }
+}
+Assert(RejectVertexEdit([editSquare],0,1,new PreviewPoint(0,0)),
+       "Vertex edit creating a zero-length edge is rejected");
+Assert(RejectVertexEdit([editSquare],0,1,new PreviewPoint(-5,5)),
+       "Vertex edit producing a self-intersection is rejected");
+Assert(RejectVertexEdit([editSquare],0,1,new PreviewPoint(double.NaN,0)),
+       "Nonfinite target rejected");
+Assert(RejectVertexEdit([editSquare],3,0,new PreviewPoint(2,2)) &&
+       RejectVertexEdit([editSquare],0,99,new PreviewPoint(2,2)),
+       "Invalid ring/vertex indices are rejected");
+var roundArcRing=new PreviewPath([
+    new PreviewArc(new(0,0),10,0,180),
+    new PreviewLine(new(-10,0),new(10,0))],true);
+Assert(RejectVertexEdit([roundArcRing],0,1,new PreviewPoint(1,1)),
+       "Analytical ARC is never silently distorted by LINE-only vertex editor");
+var outerRing=new PreviewPath([
+    new PreviewLine(new(0,0),new(20,0)),
+    new PreviewLine(new(20,0),new(20,20)),
+    new PreviewLine(new(20,20),new(0,20)),
+    new PreviewLine(new(0,20),new(0,0))],true);
+var innerRing=new PreviewPath([
+    new PreviewLine(new(5,5),new(15,5)),
+    new PreviewLine(new(15,5),new(15,15)),
+    new PreviewLine(new(15,15),new(5,15)),
+    new PreviewLine(new(5,15),new(5,5))],true);
+Assert(RejectVertexEdit([outerRing,innerRing],1,0,new PreviewPoint(0,0)),
+       "Vertex editor rejects edits making an inner hole touch the outer boundary");
+
+Console.WriteLine("AI CutPro core checks passed.");
