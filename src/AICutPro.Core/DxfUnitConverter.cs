@@ -54,10 +54,10 @@ public static class DxfUnitConverter
         }
         // Only remove the exact unit-code warning. Preserve unsupported-entity,
         // codepage and other importer warnings, which continue to block preflight.
-        var unitWarning=$"DXF $INSUNITS={confirmedSourceUnits}.";
+        var unitWarning=$"DXF $INSUNITS={confirmedSourceUnits}. Only millimetres (4) may be used in cutting jobs without conversion.";
         var warnings=source.Warnings.Where(w=>
             !(confirmedSourceUnits!=4 &&
-              w.StartsWith(unitWarning,StringComparison.Ordinal))).ToArray();
+              string.Equals(w,unitWarning,StringComparison.Ordinal))).ToArray();
         var doc=new DxfImportResult(converted,warnings,4);
         return new(doc,confirmedSourceUnits,factor);
     }
