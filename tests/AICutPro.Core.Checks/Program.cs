@@ -917,6 +917,46 @@ var r12ThreeD=DxfReader.Parse(r12Polyline.Replace(
 Assert(r12ThreeD.Warnings.Count>0,
        "3D legacy VERTEX cannot be projected as a valid 2D contour");
 
+// B1: legacy R12 scalar bulges and polyline width/extrusion fields must
+// never be silently discarded or interpreted as a cutting centerline.
+var r12DuplicateBulge=DxfReader.Parse(r12Polyline.Replace(
+    "10\n0\n20\n0", "10\n0\n20\n0\n42\n0.1\n42\n0.5"));
+Assert(r12DuplicateBulge.Shapes.Count==0 &&
+       r12DuplicateBulge.Warnings.Any(w=>w.Contains("Duplicate legacy VERTEX bulge")),
+       "R12 vertex with two competing bulges must reject whole legacy polyline");
+var r12HeaderWidth=DxfReader.Parse(r12Polyline.Replace(
+    "0\nPOLYLINE\n8\nCUT\n70\n1",
+    "0\nPOLYLINE\n8\nCUT\n70\n1\n40\n2"));
+Assert(r12HeaderWidth.Shapes.Count==0 &&
+       r12HeaderWidth.Warnings.Any(w=>w.Contains("width")),
+       "R12 nonzero polyline header width must not silently become thin contour");
+var r12VertexWidth=DxfReader.Parse(r12Polyline.Replace(
+    "0\nVERTEX\n10\n0\n20\n0",
+    "0\nVERTEX\n10\n0\n20\n0\n40\n2"));
+Assert(r12VertexWidth.Shapes.Count==0 &&
+       r12VertexWidth.Warnings.Any(w=>w.Contains("width")),
+       "R12 per-vertex width must reject unsupported wide geometry");
+var r12VertexExtrusion=DxfReader.Parse(r12Polyline.Replace(
+    "0\nVERTEX\n10\n0\n20\n0",
+    "0\nVERTEX\n10\n0\n20\n0\n210\n1"));
+Assert(r12VertexExtrusion.Shapes.Count==0 &&
+       r12VertexExtrusion.Warnings.Any(w=>w.Contains("3D")),
+       "R12 vertex with unsupported extrusion cannot project into verified XY");
+foreach(var badR12 in new[]{
+    r12DuplicateBulge,r12HeaderWidth,r12VertexWidth,r12VertexExtrusion
+})
+{
+    var gate=GeometryPreflight.Inspect(badR12,new Sheet(200,200));
+    Assert(gate.Status==GeometryPreflightStatus.Rejected &&
+           !gate.CanGenerateMachineCommands,
+           "Unsupported legacy R12 geometry cannot pass preview preflight");
+    bool exporterBlocked=false;
+    try { PreviewDxfExporter.ValidateDocument(badR12); }
+    catch(FormatException) { exporterBlocked=true; }
+    Assert(exporterBlocked,
+           "Unsupported legacy R12 geometry cannot be verified for DXF export");
+}
+
 // Deterministic numerical regression across translations and nesting scales.
 // These are synthetic oracle checks, not a substitute for external industrial DXF.
 for (int caseNo=1;caseNo<=128;caseNo++)
