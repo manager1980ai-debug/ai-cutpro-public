@@ -623,6 +623,66 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SetDxfEdgeAngleClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте 2D-эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text, out var toleranceMm))
+                throw new FormatException("Некорректный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var edgeNumber) ||
+                ringNumber < 1 || edgeNumber < 1)
+                throw new FormatException("Номер контура и ребра должен быть положительным.");
+            if (!(double.TryParse(EditEdgeAngleBox.Text, NumberStyles.Float,
+                      CultureInfo.CurrentCulture, out var degrees) ||
+                  double.TryParse(EditEdgeAngleBox.Text, NumberStyles.Float,
+                      CultureInfo.InvariantCulture, out degrees)) ||
+                !double.IsFinite(degrees))
+                throw new FormatException("Некорректный угол ребра.");
+
+            var before = PreviewDxfExporter.ValidateDocument(_dxfPreview, toleranceMm);
+            var changed = PreviewVertexEditor.SetEdgeAngle(
+                before, ringNumber - 1, edgeNumber - 1, degrees, toleranceMm);
+            var serialized = PreviewDxfExporter.Export(changed.Rings, toleranceMm);
+            var candidate = DxfReader.Parse(serialized);
+            var reopened = PreviewDxfExporter.ValidateDocument(candidate, toleranceMm);
+            var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            if (!topology.IsValid || reopened.Count != changed.Rings.Count ||
+                Math.Abs(topology.NetAreaMm2 - changed.NetAreaMm2) >
+                    Math.Max(1e-6, Math.Abs(changed.NetAreaMm2) * 1e-9))
+                throw new FormatException("Угловой DXF не прошёл повторную проверку.");
+            if (reopened[ringNumber - 1].Segments[edgeNumber - 1] is not PreviewLine edge)
+                throw new FormatException("Редактируемое ребро больше не прямолинейное.");
+            var actual = Math.Atan2(edge.End.Y - edge.Start.Y,
+                                    edge.End.X - edge.Start.X);
+            var expected = degrees * Math.PI / 180;
+            var angularError = Math.Atan2(
+                Math.Sin(actual - expected), Math.Cos(actual - expected));
+            if (Math.Abs(angularError) > 1e-8)
+                throw new FormatException("Повторно открытый DXF изменил заданный угол.");
+
+            _dxfPreview = candidate;
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text = "DXF: угловое редактирование, только предпросмотр";
+            StatusText.Text = $"Контур №{ringNumber}, ребро №{edgeNumber}: " +
+                $"угол {degrees:0.###}°, чистая площадь " +
+                $"{topology.NetAreaMm2:0.###} мм². " +
+                "Геометрия проверена; CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Изменение угла отклонено: " + ex.Message;
+        }
+    }
+
     private async void ExportEditedDxfClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
