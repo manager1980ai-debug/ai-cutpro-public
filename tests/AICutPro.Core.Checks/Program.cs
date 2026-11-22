@@ -3020,16 +3020,55 @@ try {
 } catch(FormatException){lengthAxisConflict=true;}
 Assert(lengthAxisConflict,
        "Pinned length plus pinned horizontal axis cannot silently violate either");
-bool doublePinnedLengthRejected=false;
+// Two adjacent pinned lengths: calculate both circle intersections and
+// select the branch closest to the requested point, without moving anchors.
+var dualSource=PreviewDxfExporter.ValidateDocument(Document(
+    Closed("DUAL_LENGTH",new Point2(0,0),new Point2(80,20),
+           new Point2(120,100),new Point2(0,100)),
+    new DxfCircle("DUAL_HOLE",new Point2(20,90),5)));
+var firstDual=PreviewPersistentLengthConstraints.Add(
+    dualSource,Array.Empty<PreviewLengthRule>(),0,0);
+var dualLengths=PreviewPersistentLengthConstraints.Add(
+    dualSource,firstDual,0,1);
+var dualOriginal=PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
+    dualSource,0,1,new PreviewPoint(80,20),dualLengths,
+    Array.Empty<PreviewAxisRule>());
+var dualAlternative=PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
+    dualSource,0,1,new PreviewPoint(34,75),dualLengths,
+    Array.Empty<PreviewAxisRule>());
+var dualPoint=((PreviewLine)dualAlternative.Rings[0].Segments[1]).Start;
+Assert(dualOriginal.IsValidForPreview && dualAlternative.IsValidForPreview &&
+       !dualAlternative.CanStartMachine &&
+       Math.Abs(dualPoint.X-80)>10 &&
+       Math.Abs(dualPoint.Y-20)>10 &&
+       PreviewContourTopology.Analyze(dualAlternative.Rings).IsValid &&
+       dualAlternative.Rings[1].Segments.Count==dualSource[1].Segments.Count,
+       "Two fixed lengths select the alternate valid circle intersection");
+PreviewPersistentLengthConstraints.RequireCompatibleEdit(
+    dualSource,dualAlternative.Rings,dualLengths);
+PreviewDxfRoundTripVerifier.Verify(dualAlternative.Rings,
+    PreviewDxfExporter.Export(dualAlternative.Rings));
+var firstDualLine=(PreviewLine)dualAlternative.Rings[0].Segments[0];
+var secondDualLine=(PreviewLine)dualAlternative.Rings[0].Segments[1];
+Assert(Math.Abs(Math.Sqrt(Math.Pow(firstDualLine.End.X-firstDualLine.Start.X,2)+
+                           Math.Pow(firstDualLine.End.Y-firstDualLine.Start.Y,2))-
+                dualLengths[0].LengthMm)<1e-6 &&
+       Math.Abs(Math.Sqrt(Math.Pow(secondDualLine.End.X-secondDualLine.Start.X,2)+
+                           Math.Pow(secondDualLine.End.Y-secondDualLine.Start.Y,2))-
+                dualLengths[1].LengthMm)<1e-6,
+       "Both fixed lengths remain exact after circle-circle solution");
+bool wrongDualAxisRejected=false;
 try {
-    var doubleLengths=PreviewPersistentLengthConstraints.Add(
-        lengthSource,pinnedLength,0,1);
+    var extraAxis=PreviewPersistentAxisConstraints.Add(
+        dualSource,Array.Empty<PreviewAxisRule>(),new PreviewAxisRule(0,3,false));
+    // Vertex 0 is on that axis, but vertex 1 is not: this unrelated axis
+    // remains valid while both lengths are solved.
     PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
-        lengthSource,0,1,new PreviewPoint(90,40),doubleLengths,
-        Array.Empty<PreviewAxisRule>());
-} catch(FormatException){doublePinnedLengthRejected=true;}
-Assert(doublePinnedLengthRejected,
-       "Two adjacent fixed-length edges require future multi-circle solver");
+        dualSource,0,1,new PreviewPoint(34,75),dualLengths,extraAxis);
+} catch(FormatException){wrongDualAxisRejected=true;}
+Assert(!wrongDualAxisRejected,
+       "Unrelated pinned axis must not block dual-length intersection");
+
 bool invalidLengthEdgeRejected=false;
 try {PreviewPersistentLengthConstraints.Add(
     lengthSource,pinnedLength,1,0);}
