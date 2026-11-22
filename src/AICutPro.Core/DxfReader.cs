@@ -313,6 +313,11 @@ public static class DxfReader
         // entities visible for diagnosis, but attach a blocking warning.
         if (pendingSection is not null || section.Length > 0)
             warnings.Add("DXF contains an unterminated or malformed SECTION.");
+        // Reaching the end of the input is not equivalent to an explicit
+        // DXF EOF marker. A truncated file may contain apparently valid
+        // closed geometry but must remain diagnostic-only.
+        if (!sawEof)
+            warnings.Add("DXF is missing its mandatory EOF marker.");
         if (units != 4)
             warnings.Add(units == null || units == 0
                 ? "DXF unit is unspecified. Confirm units before importing into millimetre jobs."
