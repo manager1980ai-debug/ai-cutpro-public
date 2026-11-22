@@ -12,7 +12,8 @@ public static class PreviewRigidTransformEditor
     {
         if (!double.IsFinite(dxMm) || !double.IsFinite(dyMm))
             throw new FormatException("Translation must be finite.");
-        return Apply(rings, p => new(p.X + dxMm, p.Y + dyMm), a => a,
+        return Apply(rings, p => new(p.X + dxMm, p.Y + dyMm),
+            a => (a.StartDegrees, a.SweepDegrees),
             toleranceMm);
     }
 
