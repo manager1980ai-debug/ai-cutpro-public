@@ -1673,4 +1673,56 @@ foreach (double originalSweep in new[]{60d,120d,240d,300d,-60d,-120d,-240d,-300d
 Assert(testedArcBranches==16,
        "All CW/CCW and minor/major analytical ARC radius scenarios executed");
 
+// Stage 2 B3: independent four-level containment oracle for 3D CSG.
+// Alternating external material, void, island and inner void must be
+// preserved without flattening the topology into a single outer rectangle.
+int verifiedFourLevelScenarios = 0;
+foreach (double shift in new[] { 0d, 125d, 1_000d })
+foreach (double scale in new[] { 0.5d, 1d, 2d, 5d })
+{
+    DxfPolyline NestedSquare(string layer, double inset)
+    {
+        double loX = shift + inset * scale;
+        double loY = shift / 2 + inset * scale;
+        double hiX = shift + (1000 - inset) * scale;
+        double hiY = shift / 2 + (1000 - inset) * scale;
+        return Closed(layer, new Point2(loX, loY), new Point2(hiX, loY),
+            new Point2(hiX, hiY), new Point2(loX, hiY));
+    }
+    var nestedDrawing = Document(
+        NestedSquare("OUTER", 0),
+        NestedSquare("VOID", 100),
+        NestedSquare("ISLAND", 200),
+        NestedSquare("ISLAND_HOLE", 300));
+    var nestedRings = PreviewDxfExporter.ValidateDocument(nestedDrawing);
+    var nestedTopology = PreviewContourTopology.Analyze(nestedRings);
+    var expectedNestedArea = (1_000_000d - 640_000d +
+                              360_000d - 160_000d) * scale * scale;
+    Assert(nestedTopology.IsValid && nestedTopology.Rings.Count == 4 &&
+           nestedTopology.Rings.Count(r => r.IsMaterialBoundary) == 2 &&
+           nestedTopology.Rings.Count(r => !r.IsMaterialBoundary) == 2 &&
+           Math.Abs(nestedTopology.NetAreaMm2 - expectedNestedArea) <
+               Math.Max(1e-5, expectedNestedArea * 1e-10),
+           "Four-level containment matches independent alternating-square area oracle");
+    var nestedAssembly = DxfAssembly3DExporter.Export(nestedDrawing, 3);
+    Assert(nestedAssembly.MaterialRegionCount == 2 &&
+           nestedAssembly.HoleCount == 2 &&
+           nestedAssembly.OpenScad.Split("difference()").Length - 1 == 2 &&
+           nestedAssembly.OpenScad.Split("linear_extrude(").Length - 1 == 4 &&
+           Math.Abs(nestedAssembly.VolumeMm3 - expectedNestedArea * 3) <
+               Math.Max(1e-4, expectedNestedArea * 3e-10) &&
+           !nestedAssembly.CanStartMachine &&
+           !nestedAssembly.IsManufacturingValidated,
+           "Four-level DXF CSG assembly preserves nested islands, holes and exact volume");
+    var nestedDxf = PreviewDxfExporter.Export(nestedRings);
+    var restoredRings = PreviewDxfRoundTripVerifier.Verify(nestedRings, nestedDxf);
+    Assert(restoredRings.Count == 4 &&
+           Math.Abs(PreviewContourTopology.Analyze(restoredRings).NetAreaMm2 -
+                    expectedNestedArea) < Math.Max(1e-5, expectedNestedArea * 1e-10),
+           "Nested four-level DXF export/import preserves all analytical ring topology");
+    verifiedFourLevelScenarios++;
+}
+Assert(verifiedFourLevelScenarios == 12,
+       "All four-level translated/scaled 3D assembly regression cases ran");
+
 Console.WriteLine("AI CutPro core checks passed.");
