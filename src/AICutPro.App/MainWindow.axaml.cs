@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private VirtualMachine _virtualMachine = VirtualMachine.Create(WorkspaceGeometry.Default);
     private DxfImportResult? _dxfPreview;
     private DxfPreviewHistory? _dxfHistory;
+    private IReadOnlyList<DxfDiagnosticFinding> _dxfDiagnostics = [];
     private int? _selectedPlacement;
     private double _zoom = 1;
     private double _panX, _panY;
@@ -343,6 +344,11 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ShowDxfDiagnosticsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        new DxfDiagnosticsWindow(_dxfDiagnostics).Show(this);
+    }
+
     private async void ImportDxfClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -354,6 +360,7 @@ public partial class MainWindow : Window
                 FileTypeFilter = [new FilePickerFileType("DXF") { Patterns = ["*.dxf"] }]
             });
             if (selected.Count == 0) return;
+            _dxfDiagnostics = []; // A new attempt must not show stale findings.
             await using var stream = await selected[0].OpenReadAsync();
             using var data = new MemoryStream();
             var buffer = new byte[81920];
@@ -389,6 +396,9 @@ public partial class MainWindow : Window
                 ? MixedContourAssembler.Assemble(imported.Shapes, toleranceMm)
                 : new MixedContourAssembly([], ["Единицы не подтверждены как миллиметры."], false);
             var gate = GeometryPreflight.Inspect(imported, _workspace.MaterialSheet);
+            var fullDiagnosticIssues = new List<string>();
+            fullDiagnosticIssues.AddRange(gate.BlockingIssues);
+            fullDiagnosticIssues.AddRange(mixedTopology.Warnings);
             var contourMeasurements = mixedTopology.Complete
                 ? mixedTopology.ClosedPaths.Select(path => PreviewContourMetrics.Measure(path, toleranceMm)).ToArray()
                 : [];
@@ -424,6 +434,8 @@ public partial class MainWindow : Window
             {
                 var policy = PreviewGeometryTolerancePolicy.Create(toleranceMm, toleranceMm);
                 var nested = policy.ValidateDrawing(mixedTopology.ClosedPaths);
+                if (!nested.IsValid)
+                    fullDiagnosticIssues.AddRange(nested.Issues);
                 contourNote += nested.IsValid
                     ? $" Аналитическая вложенность: {nested.Rings.Count} контур(ов), " +
                       $"площадь с учётом внутренних контуров {nested.NetAreaMm2:0.###} мм². " +
@@ -447,8 +459,11 @@ public partial class MainWindow : Window
             // Preview remains visible even for rejected geometry. Surface a
             // stable, offline diagnostic with a repair explanation; do not
             // mistake a readable DXF for an approved manufacturing profile.
-            var geometryIssues = gate.BlockingIssues.Concat(mixedTopology.Warnings)
+            var geometryIssues = fullDiagnosticIssues
                 .Distinct(StringComparer.Ordinal).ToArray();
+            _dxfDiagnostics = geometryIssues
+                .Select(issue => new DxfDiagnosticFinding(
+                    DxfDiagnosticCatalog.ClassifyGeometry(issue), issue)).ToArray();
             if (geometryIssues.Length > 0)
             {
                 StatusText.Text += " Диагностика: " +
@@ -461,7 +476,12 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = "Не удалось прочитать DXF. " + DxfDiagnosticCatalog.ExplainRu(ex);
+            _dxfDiagnostics =
+            [
+                new DxfDiagnosticFinding(DxfDiagnosticCatalog.Classify(ex), ex.Message)
+            ];
+            StatusText.Text = "Не удалось прочитать DXF. " + DxfDiagnosticCatalog.ExplainRu(ex) +
+                              " Откройте «Диагностика DXF (все замечания)» для подробностей.";
         }
     }
 
