@@ -346,7 +346,9 @@ public partial class MainWindow : Window
 
     private void ShowDxfDiagnosticsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        new DxfDiagnosticsWindow(_dxfDiagnostics).Show(this);
+        var diagnostics = new DxfDiagnosticsWindow(_dxfDiagnostics);
+        diagnostics.Show();
+        StatusText.Text = $"Открыта диагностика DXF: {_dxfDiagnostics.Count} замечаний. CAM и резка запрещены.";
     }
 
     private async void ImportDxfClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
