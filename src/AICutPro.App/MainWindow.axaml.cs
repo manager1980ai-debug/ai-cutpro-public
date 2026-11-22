@@ -450,7 +450,19 @@ public partial class MainWindow : Window
     {
         if (_dxfHistory is null)
             throw new InvalidOperationException("No active DXF editing session.");
-        _dxfHistory.Push(verified);
+        var rules=_dxfHistory.CurrentAxisRules;
+        if(rules.Count>0)
+        {
+            if(_dxfPreview is null)
+                throw new FormatException("No source drawing for pinned constraints.");
+            if(!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Invalid geometric tolerance.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var after=PreviewDxfExporter.ValidateDocument(verified,toleranceMm);
+            PreviewPersistentAxisConstraints.RequireCompatibleEdit(
+                before,after,rules,toleranceMm);
+        }
+        _dxfHistory.Push(verified,rules);
         _dxfPreview = _dxfHistory.Current;
     }
 
@@ -1099,6 +1111,49 @@ public partial class MainWindow : Window
         catch (Exception ex) when (ex is FormatException or ArgumentException)
         {
             StatusText.Text = "Изменение угла отклонено: " + ex.Message;
+        }
+    }
+
+    private void PinAxisConstraintClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) => ChangeAxisRule(add:true);
+
+    private void UnpinAxisConstraintClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) => ChangeAxisRule(add:false);
+
+    private void ChangeAxisRule(bool add)
+    {
+        try
+        {
+            if(_dxfPreview is null || _dxfHistory is null)
+                throw new FormatException("Сначала откройте DXF.");
+            if(!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный допуск DXF.");
+            if(!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber) ||
+               !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var edgeNumber) ||
+               ringNumber<1 || edgeNumber<1)
+                throw new FormatException("Номера контура и ребра должны быть положительными.");
+            var horizontal=AxisConstraintDirectionBox.SelectedIndex==0;
+            var rule=new PreviewAxisRule(ringNumber-1,edgeNumber-1,horizontal);
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var rules=add
+                ? PreviewPersistentAxisConstraints.Add(
+                    before,_dxfHistory.CurrentAxisRules,rule,toleranceMm)
+                : PreviewPersistentAxisConstraints.Remove(
+                    _dxfHistory.CurrentAxisRules,rule);
+            PreviewPersistentAxisConstraints.Verify(before,rules,toleranceMm);
+            // A constraint-only edit is still one atomic Undo/Redo snapshot.
+            _dxfHistory.Push(_dxfPreview,rules);
+            _dxfPreview=_dxfHistory.Current;
+            StatusText.Text=add
+                ? $"Ограничение {(horizontal?"горизонтали":"вертикали")} закреплено: контур №{ringNumber}, ребро №{edgeNumber}. Undo/Redo доступны."
+                : $"Ограничение снято: контур №{ringNumber}, ребро №{edgeNumber}. Undo/Redo доступны.";
+            StatusText.Text+=" CAM и резка запрещены.";
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Изменение сохраняемого ограничения отклонено: "+ex.Message;
         }
     }
 
