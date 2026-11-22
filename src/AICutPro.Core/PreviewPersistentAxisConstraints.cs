@@ -118,15 +118,11 @@ public static class PreviewPersistentAxisConstraints
             if(rule.RingIndex!=ringIndex ||
                (rule.SegmentIndex!=vertexIndex && rule.SegmentIndex!=prev))
                 continue;
-            var other=rule.SegmentIndex==vertexIndex
-                ? (PreviewLine)path.Segments[(vertexIndex+1)%count]
-                : (PreviewLine)path.Segments[prev];
-            var otherPoint=rule.SegmentIndex==vertexIndex
-                ? other.Start : other.Start;
             // The opposite vertex is the outgoing edge's end, or the
             // incoming edge's start. Both are fixed during this edit.
-            if(rule.SegmentIndex==vertexIndex)
-                otherPoint=((PreviewLine)path.Segments[vertexIndex]).End;
+            var otherPoint=rule.SegmentIndex==vertexIndex
+                ? ((PreviewLine)path.Segments[vertexIndex]).End
+                : ((PreviewLine)path.Segments[prev]).Start;
             var value=rule.Horizontal?otherPoint.Y:otherPoint.X;
             if(rule.Horizontal)
             {
