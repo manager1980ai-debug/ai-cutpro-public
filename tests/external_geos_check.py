@@ -58,9 +58,9 @@ def check_geos_oracle(folder):
     holes = min(faces, key=lambda face: face.area)
     if len(material.interiors) != 1 or not material.is_valid or not holes.is_valid:
         raise AssertionError("GEOS did not independently identify one plate hole")
-    if not material.disjoint(holes):
-        # The polygon inside the hole must not overlap material.
-        raise AssertionError("Hole polygon overlaps material polygon")
+    if material.intersection(holes).area > 1e-7:
+        # Sharing the hole boundary is valid; overlapping interior is not.
+        raise AssertionError("Hole interior overlaps material polygon")
     # Oracle sourced from the explicit fixture geometry, not AI CutPro's
     # manifest perimeter or the product's topology/area calculations.
     # The final contour is the rectangle [0,110] x [0,100], with R10 hole.
