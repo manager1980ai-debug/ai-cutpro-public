@@ -25,20 +25,36 @@ public static class DxfReader
     }
     private static double Required(IReadOnlyList<Pair> fields, int code)
     {
-        foreach (var p in fields)
-            if (p.Code == code) return Number(p);
-        throw new FormatException($"Missing required DXF group {code}");
-    }
-    private static int Integer(IReadOnlyList<Pair> fields, int code, int fallback = 0)
-    {
+        // Scalar entity coordinates and radii must not silently choose the
+        // first of two conflicting DXF groups. Repeated vertex codes in
+        // LWPOLYLINE are parsed separately and are unaffected.
+        var found = false;
+        var value = 0d;
         foreach (var p in fields)
             if (p.Code == code)
             {
-                if (!int.TryParse(p.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
-                    throw new FormatException($"Invalid DXF integer group {code}");
-                return value;
+                if (found)
+                    throw new FormatException($"Duplicate DXF scalar group {code}");
+                value = Number(p);
+                found = true;
             }
-        return fallback;
+        if (!found) throw new FormatException($"Missing required DXF group {code}");
+        return value;
+    }
+    private static int Integer(IReadOnlyList<Pair> fields, int code, int fallback = 0)
+    {
+        var found = false;
+        var result = fallback;
+        foreach (var p in fields)
+            if (p.Code == code)
+            {
+                if (found)
+                    throw new FormatException($"Duplicate DXF integer group {code}");
+                if (!int.TryParse(p.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
+                    throw new FormatException($"Invalid DXF integer group {code}");
+                found = true;
+            }
+        return result;
     }
 
     public static DxfImportResult Parse(string asciiDxf)
@@ -90,6 +106,8 @@ public static class DxfReader
                 {
                     if (!int.TryParse(pairs[i + 1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n))
                         throw new FormatException("Invalid $INSUNITS");
+                    if (units.HasValue && units.Value != n)
+                        throw new FormatException("Conflicting DXF $INSUNITS declarations.");
                     units = n;
                 }
                 i++;
