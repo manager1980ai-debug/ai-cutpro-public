@@ -1356,4 +1356,55 @@ Assert(RejectScad(scadPlate with { ThicknessMm = -1 }) &&
        RejectScad(scadPlate with { VolumeMm3 = double.NaN }),
        "3D exporter refuses inconsistent dimensions and nonfinite volume");
 
+// Synchronized 3D is generated from CURRENT DXF state, not original text.
+var syncedOriginal = DxfSynchronized3DExporter.Export(withAddedHole,5);
+Assert(syncedOriginal.HoleCount==1 &&
+       syncedOriginal.OpenScad.Contains("linear_extrude(height = 5") &&
+       syncedOriginal.OpenScad.Contains("cylinder(h = ") &&
+       syncedOriginal.OpenScad.Contains("r = 10") &&
+       Math.Abs(syncedOriginal.VolumeMm3 -
+           (20000-Math.PI*100)*5)<1e-6 &&
+       !syncedOriginal.CanStartMachine,
+       "Current edited DXF produces an analytic 3D extrusion with actual holes");
+var currentHoleMoved = PreviewCircleHoleEditor.SetHole(
+    withAddedHole,0,new PreviewPoint(120,50),30);
+var syncedHoleMoved = DxfSynchronized3DExporter.Export(currentHoleMoved,7);
+Assert(syncedHoleMoved.OpenScad.Contains("translate([120, 50, -") &&
+       syncedHoleMoved.OpenScad.Contains("r = 15") &&
+       Math.Abs(syncedHoleMoved.VolumeMm3 -
+           (20000-Math.PI*225)*7)<1e-6,
+       "3D tracks changed DXF hole center, radius, thickness and exact volume");
+var syncedUndo = new DxfPreviewHistory(withAddedHole);
+syncedUndo.Push(currentHoleMoved);
+Assert(DxfSynchronized3DExporter.Export(syncedUndo.Undo(),5)
+           .OpenScad.Contains("r = 10") &&
+       DxfSynchronized3DExporter.Export(syncedUndo.Redo(),5)
+           .OpenScad.Contains("r = 15"),
+       "3D export follows undo/redo drawing state, not stale text parameters");
+var changedOuter = PreviewVertexEditor.MoveVertex(
+    PreviewDxfExporter.ValidateDocument(withAddedHole),0,1,new PreviewPoint(210,0));
+var changedOuterDoc = DxfReader.Parse(
+    PreviewDxfExporter.Export(changedOuter.Rings));
+var syncedOuter = DxfSynchronized3DExporter.Export(changedOuterDoc,5);
+Assert(syncedOuter.OpenScad.Contains("[210, 0]") &&
+       Math.Abs(syncedOuter.NetAreaMm2-changedOuter.NetAreaMm2)<1e-6 &&
+       syncedOuter.HoleCount==1,
+       "3D tracks edited outer LINE geometry and reconstructed ARC circle holes");
+static bool RejectSynchronized3D(DxfImportResult source,double thickness)
+{
+    try { DxfSynchronized3DExporter.Export(source,thickness); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectSynchronized3D(withAddedHole,0) &&
+       RejectSynchronized3D(withAddedHole,double.NaN) &&
+       RejectSynchronized3D(withAddedHole,double.PositiveInfinity) &&
+       RejectSynchronized3D(Document(new DxfCircle("CUT",new Point2(50,50),20)),5),
+       "3D refuses zero/nonfinite thickness and unsupported curved exteriors");
+var twoPartsDoc=Document(rectangle,
+    Closed("CUT",new Point2(300,0),new Point2(320,0),
+          new Point2(320,20),new Point2(300,20)));
+Assert(RejectSynchronized3D(twoPartsDoc,5) &&
+       RejectSynchronized3D(Document(rectangle,innerHole),5),
+       "3D refuses multiple parts and unsupported noncircular through-holes");
+
 Console.WriteLine("AI CutPro core checks passed.");
