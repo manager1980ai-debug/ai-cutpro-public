@@ -754,7 +754,14 @@ public partial class MainWindow : Window
     }
 
     private void FilletLineArcClicked(object? sender,
-        Avalonia.Interactivity.RoutedEventArgs e)
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyLineArcFillet(reverse:false);
+
+    private void FilletArcLineClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyLineArcFillet(reverse:true);
+
+    private void ApplyLineArcFillet(bool reverse)
     {
         try
         {
@@ -775,8 +782,11 @@ public partial class MainWindow : Window
                 !double.IsFinite(radius))
                 throw new FormatException("Неверный радиус LINE/ARC сопряжения.");
             var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
-            var edited=PreviewLineArcFilletEditor.FilletIncomingLine(
-                before,ringNumber-1,segmentNumber-1,radius,toleranceMm);
+            var edited=reverse
+                ? PreviewLineArcFilletEditor.FilletOutgoingLine(
+                    before,ringNumber-1,segmentNumber-1,radius,toleranceMm)
+                : PreviewLineArcFilletEditor.FilletIncomingLine(
+                    before,ringNumber-1,segmentNumber-1,radius,toleranceMm);
             var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
             var imported=DxfReader.Parse(serialized);
             if (imported.Warnings.Count>0)
@@ -790,8 +800,10 @@ public partial class MainWindow : Window
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
-            PanelTitle.Text="DXF: точное касательное LINE/ARC сопряжение";
-            StatusText.Text=$"LINE/ARC: контур №{ringNumber}, ARC №{segmentNumber}, "+
+            PanelTitle.Text=reverse
+                ? "DXF: точное касательное ARC/LINE сопряжение"
+                : "DXF: точное касательное LINE/ARC сопряжение";
+            StatusText.Text=$"{(reverse?"ARC/LINE":"LINE/ARC")}: контур №{ringNumber}, сегмент №{segmentNumber}, "+
                 $"R {radius:0.###} мм; площадь {topology.NetAreaMm2:0.###} мм². "+
                 "Undo/Redo доступны. CAM и резка запрещены.";
             RenderSheet();
