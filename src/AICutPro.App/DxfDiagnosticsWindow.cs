@@ -12,7 +12,7 @@ namespace AICutPro.App;
 /// Read-only, offline diagnostic report for the last DXF import attempt.
 /// No automatic repair or cutting approval is exposed by this window.
 /// </summary>
-public sealed record DxfDiagnosticFinding(DxfDiagnosticHelp Help, string TechnicalMessage);
+public sealed record DxfDiagnosticFinding(DxfDiagnosticHelp Help, string TechnicalMessage, string? Layer = null);
 
 public sealed class DxfDiagnosticsWindow : Window
 {
@@ -42,7 +42,7 @@ public sealed class DxfDiagnosticsWindow : Window
             ItemsSource = findings.Select(f =>
                 new ListBoxItem
                 {
-                    Content = $"{f.Help.Code}: {f.Help.TitleRu}",
+                    Content = $"{f.Help.Code}: {f.Help.TitleRu}" + (f.Layer is null ? "" : $" (слой {f.Layer})"),
                     Tag = f
                 }).ToList()
         };
