@@ -49,6 +49,12 @@
           <TextBox x:Name="ExportMoveXBox" Text="0" Watermark="Смещение X, мм"/>
           <TextBox x:Name="ExportMoveYBox" Text="0" Watermark="Смещение Y, мм"/>
           <TextBox x:Name="ExportRotationBox" Text="0" Watermark="Поворот вокруг начала, °"/>
+          <TextBlock Text="Изменить весь DXF-эскиз (предпросмотр; Undo/Redo)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <Button Content="Применить перенос X/Y" Click="TranslateWholeDxfClicked"/>
+          <Button Content="Применить поворот вокруг (0, 0)" Click="RotateWholeDxfClicked"/>
+          <TextBox x:Name="MirrorAxisXBox" Text="0" Watermark="Вертикальная ось отражения, X мм"/>
+          <Button Content="Зеркально отразить по вертикали" Click="MirrorWholeDxfClicked"/>
+          <TextBlock Text="Операции меняют текущий предпросмотр и добавляются в историю Undo/Redo. Экспортные смещение/поворот работают отдельно: перед сохранением DXF установите их в 0, если повторный перенос не нужен. CAM и запуск станка запрещены." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Вершина прямолинейного контура (нумерация с 1)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditRingIndexBox" Text="1" Watermark="Номер контура"/>
           <TextBox x:Name="EditVertexIndexBox" Text="1" Watermark="Номер вершины"/>
