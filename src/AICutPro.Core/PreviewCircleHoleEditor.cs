@@ -67,10 +67,8 @@ public static class PreviewCircleHoleEditor
                 before.Rings[i].IsMaterialBoundary != after.Rings[i].IsMaterialBoundary)
                 throw new FormatException("Circle edit changed hole or island ownership.");
         if (!CircleRing(changedRings[ringIndex.Value],
-                (DxfCircle)editedShapes.First(s => s is DxfCircle c &&
-                    Math.Abs(c.Center.X-center.X)<1e-9 &&
-                    Math.Abs(c.Center.Y-center.Y)<1e-9 &&
-                    Math.Abs(c.Radius-diameterMm/2)<1e-9), toleranceMm))
+                originalCircle with { Center = new Point2(center.X, center.Y),
+                                      Radius = diameterMm / 2 }, toleranceMm))
             throw new FormatException("Edited circular geometry cannot be confirmed.");
         var exported = PreviewDxfExporter.Export(changedRings, toleranceMm);
         PreviewDxfRoundTripVerifier.Verify(changedRings, exported, toleranceMm);
