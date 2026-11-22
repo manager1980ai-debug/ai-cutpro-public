@@ -58,23 +58,20 @@ public static class DxfSynchronized3DExporter
                 throw new FormatException("Outer DXF vertices are not connected exactly.");
         }
 
-        // Only actual CIRCLE entities can describe holes in this limited
-        // model. An arbitrary four-arc shape must not be silently reinterpreted.
-        var circles = currentDxf.Shapes.OfType<DxfCircle>().ToArray();
-        if (circles.Length != rings.Count-1 || circles.Length>200)
-            throw new FormatException("3D extrusion requires explicit CIRCLE holes.");
-        var used = new bool[circles.Length];
+        // CIRCLE is represented by four exact analytic quarter arcs. Editing
+        // the exterior can reserialize those arcs as ARC entities, so recognize
+        // them by strict geometry rather than depending on their DXF entity type.
+        // Other curved holes are refused, never flattened or silently omitted.
+        var holes = new List<(PreviewPoint Center,double Radius)>();
         foreach (var info in topology.Rings.Where(r=>r.Depth==1))
         {
-            var ring = rings[info.Index];
-            var matches = Enumerable.Range(0,circles.Length).Where(i =>
-                !used[i] && MatchesCircle(ring,circles[i],epsilon)).ToArray();
-            if (matches.Length != 1)
-                throw new FormatException("Missing or ambiguous DXF circle geometry.");
-            used[matches[0]]=true;
+            var circle = RecognizeCircle(rings[info.Index],epsilon);
+            if(circle is null)
+                throw new FormatException("3D extrusion requires truly circular through-holes.");
+            holes.Add(circle.Value);
         }
-        if(used.Any(x=>!x))
-            throw new FormatException("Unexpected unclassified CIRCLE in DXF.");
+        if(holes.Count > 200)
+            throw new FormatException("Too many 3D through-holes.");
 
         var roundTrip = PreviewDxfExporter.Export(rings,toleranceMm);
         PreviewDxfRoundTripVerifier.Verify(rings,roundTrip,toleranceMm);
@@ -98,7 +95,7 @@ public static class DxfSynchronized3DExporter
         }
         scad.AppendLine("]);");
         scad.AppendLine("  }");
-        foreach(var circle in circles)
+        foreach(var circle in holes)
         {
             // Extend the cutter past both faces to avoid coplanar CSG artifacts.
             var overhang = Math.Min(0.1, thicknessMm/4);
@@ -111,18 +108,29 @@ public static class DxfSynchronized3DExporter
         }
         scad.AppendLine("}");
         return new(scad.ToString(),thicknessMm,topology.NetAreaMm2,
-                   volume,circles.Length);
+                   volume,holes.Count);
     }
 
-    private static bool MatchesCircle(PreviewPath ring, DxfCircle circle, double eps)
+    private static (PreviewPoint Center,double Radius)? RecognizeCircle(
+        PreviewPath ring,double eps)
     {
         if (!ring.Closed || ring.Segments.Count!=4 ||
-            ring.Segments.Any(s=>s is not PreviewArc))return false;
-        return ring.Segments.Cast<PreviewArc>().All(a=>
-            Math.Abs(a.Center.X-circle.Center.X)<=eps &&
-            Math.Abs(a.Center.Y-circle.Center.Y)<=eps &&
-            Math.Abs(a.RadiusMm-circle.Radius)<=eps &&
-            Math.Abs(Math.Abs(a.SweepDegrees)-90)<1e-8);
+            ring.Segments.Any(s=>s is not PreviewArc)) return null;
+        var arcs=ring.Segments.Cast<PreviewArc>().ToArray();
+        var origin=arcs[0];
+        if(!double.IsFinite(origin.RadiusMm) || origin.RadiusMm<=eps)
+            return null;
+        var sweep=arcs.Sum(a=>a.SweepDegrees);
+        if(Math.Abs(Math.Abs(sweep)-360)>1e-8)
+            return null;
+        foreach(var a in arcs)
+            if(Math.Abs(a.Center.X-origin.Center.X)>eps ||
+               Math.Abs(a.Center.Y-origin.Center.Y)>eps ||
+               Math.Abs(a.RadiusMm-origin.RadiusMm)>eps ||
+               Math.Abs(Math.Abs(a.SweepDegrees)-90)>1e-8 ||
+               Math.Sign(a.SweepDegrees)!=Math.Sign(origin.SweepDegrees))
+                return null;
+        return (origin.Center,origin.RadiusMm);
     }
     private static double Distance(PreviewPoint a,PreviewPoint b) =>
         Math.Sqrt(Math.Pow(a.X-b.X,2)+Math.Pow(a.Y-b.Y,2));
