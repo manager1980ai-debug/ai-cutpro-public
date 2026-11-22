@@ -48,14 +48,21 @@ public static class PreviewContourValidator
         if(Math.Abs(det)<=Eps)
         {
             if(Math.Abs(Cross(qmp,r))>Eps) return [];
-            // Collinear but disjoint finite segments are safe. Only actual overlap
-            // or endpoint contact remains ambiguous and must fail closed.
-            bool separated =
-                Math.Max(a.Start.X,a.End.X) < Math.Min(b.Start.X,b.End.X)-Eps ||
-                Math.Max(b.Start.X,b.End.X) < Math.Min(a.Start.X,a.End.X)-Eps ||
-                Math.Max(a.Start.Y,a.End.Y) < Math.Min(b.Start.Y,b.End.Y)-Eps ||
-                Math.Max(b.Start.Y,b.End.Y) < Math.Min(a.Start.Y,a.End.Y)-Eps;
-            return separated ? [] : null;
+            // Collinear segments may share exactly one endpoint (a legitimate
+            // subdivision), but overlapping interiors remain ambiguous.
+            var useX = Math.Abs(r.X) >= Math.Abs(r.Y);
+            var a0 = useX ? a.Start.X : a.Start.Y;
+            var a1 = useX ? a.End.X : a.End.Y;
+            var b0 = useX ? b.Start.X : b.Start.Y;
+            var b1 = useX ? b.End.X : b.End.Y;
+            var lo = Math.Max(Math.Min(a0,a1),Math.Min(b0,b1));
+            var hi = Math.Min(Math.Max(a0,a1),Math.Max(b0,b1));
+            if (hi < lo-Eps) return [];
+            if (hi > lo+Eps) return null;
+            foreach (var endpoint in new[]{a.Start,a.End})
+                if (Dist(endpoint,b.Start)<=Eps || Dist(endpoint,b.End)<=Eps)
+                    return [endpoint];
+            return null;
         }
         var u=Cross(qmp,r)/det;
         var t=Cross(qmp,s)/det;
