@@ -1328,4 +1328,32 @@ Assert(addingHistory.Undo().Shapes.Count==1 &&
        addingHistory.Redo().Shapes.Count==2,
        "New hole can be undone and redone without modifying original DXF");
 
+// Stage 2: explicit 3D constructive solid geometry for a plate with holes.
+var scadPlate = TextPlateSketch.Parse("PLATE 200 100 5; HOLE 50 50 10; HOLE 150 50 8");
+var scad = PlateOpenScadExporter.Export(scadPlate);
+Assert(scad.Contains("difference()") &&
+       scad.Contains("cube([200, 100, 5]") &&
+       scad.Contains("translate([50, 50, 0]) cylinder(h = 5, r = 10") &&
+       scad.Contains("translate([150, 50, 0]) cylinder(h = 5, r = 8") &&
+       scad.Split("cylinder(").Length - 1 == 2,
+       "OpenSCAD exports a three-dimensional solid with both real through-holes");
+Assert(Math.Abs(scadPlate.VolumeMm3 -
+       (20000 - Math.PI*164)*5) < 1e-7,
+       "3D parametric volume matches 2D analytical geometry and plate thickness");
+var emptyScad = PlateOpenScadExporter.Export(TextPlateSketch.Parse("PLATE 20 10 2"));
+Assert(emptyScad.Contains("cube([20, 10, 2]") &&
+       !emptyScad.Contains("cylinder("), "Solid plate without holes exports correctly");
+var deScad = PlateOpenScadExporter.Export(TextPlateSketch.Parse("PLATE 12.5 7.25 2.5"));
+Assert(deScad.Contains("12.5") && !deScad.Contains("12,5"),
+       "3D export uses invariant decimal formatting");
+static bool RejectScad(ExtrudedPlatePreview plate)
+{
+    try { PlateOpenScadExporter.Export(plate); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectScad(scadPlate with { ThicknessMm = -1 }) &&
+       RejectScad(scadPlate with { NetAreaMm2 = 123 }) &&
+       RejectScad(scadPlate with { VolumeMm3 = double.NaN }),
+       "3D exporter refuses inconsistent dimensions and nonfinite volume");
+
 Console.WriteLine("AI CutPro core checks passed.");
