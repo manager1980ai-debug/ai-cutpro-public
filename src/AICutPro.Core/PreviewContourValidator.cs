@@ -23,13 +23,18 @@ public static class PreviewContourValidator
         PreviewArc a => (OnArc(a,a.StartDegrees),OnArc(a,a.StartDegrees+a.SweepDegrees)),
         _ => throw new ArgumentException("Unsupported preview segment")
     };
-    private static bool AngleInArc(PreviewArc arc,PreviewPoint p)
+    private static bool AngleInArc(PreviewArc arc,PreviewPoint p,double eps)
     {
+        // Convert linear intersection tolerance to angle at the actual radius.
+        // Include both sides of the 0/360 seam near the start of the sweep.
+        if (!double.IsFinite(arc.RadiusMm) || arc.RadiusMm <= 0) return false;
+        var angularEps = Math.Asin(Math.Min(1d,eps/arc.RadiusMm))*180d/Math.PI;
         var angle=Normalize(Math.Atan2(p.Y-arc.Center.Y,p.X-arc.Center.X)*180/Math.PI);
         var start=Normalize(arc.StartDegrees);
         var sweep=arc.SweepDegrees;
         var progress=sweep>=0 ? Normalize(angle-start) : Normalize(start-angle);
-        return progress<=Math.Abs(sweep)+1e-6;
+        return progress<=Math.Abs(sweep)+angularEps ||
+               progress>=360-angularEps;
     }
     private static IReadOnlyList<PreviewPoint>? Intersections(PreviewSegment s,PreviewSegment t, double eps)
     {
@@ -85,7 +90,7 @@ public static class PreviewContourValidator
         {
             if(parameter < -eps || parameter > 1+eps)continue;
             var p=new PreviewPoint(l.Start.X+parameter*d.X,l.Start.Y+parameter*d.Y);
-            if(AngleInArc(arc,p) && !result.Any(x=>Dist(x,p)<=eps))
+            if(AngleInArc(arc,p,eps) && !result.Any(x=>Dist(x,p)<=eps))
                 result.Add(p);
         }
         return result;
@@ -111,12 +116,13 @@ public static class PreviewContourValidator
             var ra=Ranges(a);var rb=Ranges(b);
             foreach(var ia in ra)
             foreach(var ib in rb)
-                if(Math.Min(ia.Hi,ib.Hi)-Math.Max(ia.Lo,ib.Lo)>1e-8)
+                if(Math.Min(ia.Hi,ib.Hi)-Math.Max(ia.Lo,ib.Lo) >
+                   Math.Asin(Math.Min(1d,eps/Math.Max(a.RadiusMm,1e-12)))*180d/Math.PI)
                     return null;
             var endpoints=new[]{Ends(a).Start,Ends(a).End,Ends(b).Start,Ends(b).End};
             var shared=new List<PreviewPoint>();
             foreach(var p in endpoints)
-                if (AngleInArc(a,p) && AngleInArc(b,p) &&
+                if (AngleInArc(a,p,eps) && AngleInArc(b,p,eps) &&
                     !shared.Any(q=>Dist(p,q)<=eps))shared.Add(p);
             return shared;
         }
@@ -133,8 +139,11 @@ public static class PreviewContourValidator
             new PreviewPoint(center.X-uy*h,center.Y+ux*h),
             new PreviewPoint(center.X+uy*h,center.Y-ux*h)
         };
-        return points.Where(p=>AngleInArc(a,p)&&AngleInArc(b,p))
-            .DistinctBy(p=>(Math.Round(p.X,7),Math.Round(p.Y,7))).ToArray();
+        var valid=new List<PreviewPoint>();
+        foreach(var p in points)
+            if(AngleInArc(a,p,eps)&&AngleInArc(b,p,eps) &&
+               !valid.Any(q=>Dist(p,q)<=eps)) valid.Add(p);
+        return valid;
     }
 
     /// <summary>
