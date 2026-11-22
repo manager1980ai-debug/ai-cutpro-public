@@ -635,8 +635,10 @@ public partial class MainWindow : Window
                 !Number(EditVertexYBox.Text,out var y))
                 throw new FormatException("Неверные координаты вершины.");
             var verified=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
-            var edited=PreviewVertexEditor.MoveVertex(
-                verified,ringNumber-1,vertexNumber-1,new PreviewPoint(x,y),toleranceMm);
+            var rules=_dxfHistory?.CurrentAxisRules ?? Array.Empty<PreviewAxisRule>();
+            var edited=PreviewPersistentAxisConstraints.MoveVertexConstrained(
+                verified,ringNumber-1,vertexNumber-1,new PreviewPoint(x,y),
+                rules,toleranceMm);
             // Reimport the proposed drawing before replacing current preview.
             var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
             var imported=DxfReader.Parse(serialized);
@@ -651,8 +653,9 @@ public partial class MainWindow : Window
             UpdatePartCard();
             UpdateHoleSummary();
             PanelTitle.Text="DXF: проверенное изменение вершины, только предпросмотр";
+            var actualVertex=((PreviewLine)edited.Rings[ringNumber-1].Segments[vertexNumber-1]).Start;
             StatusText.Text=$"Контур №{ringNumber}, вершина №{vertexNumber}: " +
-                $"X {x:0.###}, Y {y:0.###} мм; " +
+                $"X {actualVertex.X:0.###}, Y {actualVertex.Y:0.###} мм; " +
                 $"чистая площадь {checkedTopology.NetAreaMm2:0.###} мм². " +
                 "Изменение готово к отдельному сохранению DXF, CAM и резка запрещены.";
             RenderSheet();
