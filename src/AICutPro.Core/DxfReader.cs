@@ -258,12 +258,13 @@ public static class DxfReader
                         double? x = null;
                         double? y = null;
                         double bulge = 0;
+                        bool bulgeSeen = false;
                         void FinishVertex()
                         {
                             if (x is null || y is null) throw new FormatException("Polyline vertex missing coordinate");
                             vertices.Add(new Point2(x.Value, y.Value));
                             bulges.Add(bulge);
-                            x = null; y = null; bulge = 0;
+                            x = null; y = null; bulge = 0; bulgeSeen = false;
                         }
                         foreach (var field in fields)
                         {
@@ -280,7 +281,9 @@ public static class DxfReader
                             else if (field.Code == 42)
                             {
                                 if (x is null || y is null) throw new FormatException("Polyline bulge before vertex");
+                                if (bulgeSeen) throw new FormatException("Duplicate LWPOLYLINE vertex bulge.");
                                 bulge = Number(field);
+                                bulgeSeen = true;
                             }
                         }
                         if (x is not null) FinishVertex();
