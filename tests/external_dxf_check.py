@@ -481,6 +481,63 @@ def run_negative_graph_regressions():
         raise AssertionError("Negative regression: touching rings accepted")
 
 
+
+def run_numerical_stress_regressions():
+    """Deterministic scale, translation, and tolerance-boundary checks."""
+    def rectangle(space,x0,y0,x1,y1):
+        corners=[(x0,y0),(x1,y0),(x1,y1),(x0,y1)]
+        for a,b in zip(corners,corners[1:]+corners[:1]):
+            space.add_line(a,b)
+
+    for scale,shift in [(0.001,0),(1.0,0),(10000.0,100000000.0)]:
+        def transform(x,y):
+            return (shift+x*scale,shift+y*scale)
+        space=ezdxf.new().modelspace()
+        for corners in [(0,0,100,100),(20,20,40,40),(25,25,30,30)]:
+            a=transform(*corners[:2])
+            b=transform(*corners[2:])
+            rectangle(space,a[0],a[1],b[0],b[1])
+        entities=list(space)
+        tolerance=max(1e-8,scale*1e-7)
+        check_closed_contour_graph(entities,tolerance)
+        check_line_intersections(entities,tolerance)
+        if check_ring_nesting(entities,3,1,tolerance)!=(3,1):
+            raise AssertionError(f"Nesting changes at DXF scale {scale}")
+        crossed=ezdxf.new().modelspace()
+        crossed.add_line(transform(0,0),transform(100,100))
+        crossed.add_line(transform(0,100),transform(100,0))
+        try:
+            check_line_intersections(list(crossed),tolerance)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"Crossing lost at DXF scale {scale}")
+
+    nearly_closed=ezdxf.new().modelspace()
+    nearly_closed.add_line((0,0),(100,0))
+    nearly_closed.add_line((100.0005,0),(100,100))
+    nearly_closed.add_line((100,100),(0,100))
+    nearly_closed.add_line((0,100),(0,0))
+    check_closed_contour_graph(list(nearly_closed),0.001)
+    try:
+        check_closed_contour_graph(list(nearly_closed),0.0001)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("DXF gap larger than tolerance was accepted")
+
+    for radius in (0.1,10,1000000):
+        touching=ezdxf.new().modelspace()
+        touching.add_line((-2*radius,radius),(2*radius,radius))
+        touching.add_arc((0,0),radius,0,180)
+        try:
+            check_curved_intersections(list(touching),max(1e-9,radius*1e-9))
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError(f"Interior LINE/ARC tangent accepted at R{radius}")
+
+
 def check_sample(root: pathlib.Path, case: dict) -> None:
     path = root / case["file"]
     doc = ezdxf.readfile(path)
@@ -544,6 +601,7 @@ def check_sample(root: pathlib.Path, case: dict) -> None:
 
 if __name__ == "__main__":
     run_negative_graph_regressions()
+    run_numerical_stress_regressions()
     folder = pathlib.Path(sys.argv[1])
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     if len(manifest) < 4:
