@@ -68,6 +68,56 @@ public static class PreviewVertexEditor
         return new(updated,checkedTopology.NetAreaMm2,true);
     }
 
+
+    /// <summary>
+    /// Removes one vertex of a line-only ring by joining its two adjacent edges.
+    /// This changes the shape and is permitted only after complete topology validation.
+    /// It never edits arcs, drops an entire ring, or enables machine control.
+    /// </summary>
+    public static PreviewVertexEditResult DeleteVertex(
+        IReadOnlyList<PreviewPath> rings, int ringIndex, int vertexIndex,
+        double toleranceMm = 0.01)
+    {
+        ArgumentNullException.ThrowIfNull(rings);
+        if (!double.IsFinite(toleranceMm) || toleranceMm < 0.0001 || toleranceMm > 1)
+            throw new ArgumentOutOfRangeException(nameof(toleranceMm));
+        if (rings.Count is < 1 or > 1000 || ringIndex < 0 || ringIndex >= rings.Count)
+            throw new FormatException("Invalid ring index.");
+        var original = PreviewContourTopology.Analyze(rings, toleranceMm);
+        if (!original.IsValid)
+            throw new FormatException("Original contour topology is not verified.");
+        var source = rings[ringIndex];
+        if (!source.Closed || source.Segments.Count is < 4 or > 2000 ||
+            source.Segments.Any(s => s is not PreviewLine))
+            throw new FormatException("Deletion requires a closed line-only ring with at least four vertices.");
+        if (vertexIndex < 0 || vertexIndex >= source.Segments.Count)
+            throw new FormatException("Invalid vertex index.");
+        var vertices = source.Segments.Cast<PreviewLine>().Select(s => s.Start).ToList();
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            var segment = (PreviewLine)source.Segments[i];
+            if (Distance(segment.End, vertices[(i + 1) % vertices.Count]) > toleranceMm)
+                throw new FormatException("Original ring has mismatched vertex endpoints.");
+        }
+        vertices.RemoveAt(vertexIndex);
+        var lines = new List<PreviewSegment>(vertices.Count);
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            var a = vertices[i];
+            var b = vertices[(i + 1) % vertices.Count];
+            if (Distance(a, b) <= toleranceMm)
+                throw new FormatException("Deletion creates a degenerate edge.");
+            lines.Add(new PreviewLine(a, b));
+        }
+        var updated = rings.ToArray();
+        updated[ringIndex] = new PreviewPath(lines, true);
+        var verified = PreviewContourTopology.Analyze(updated, toleranceMm);
+        if (!verified.IsValid)
+            throw new FormatException("Vertex deletion invalidates ring topology: " +
+                string.Join("; ", verified.Issues));
+        return new(updated, verified.NetAreaMm2, true);
+    }
+
     /// <summary>
     /// Subdivides a straight edge by adding one interior vertex. The geometry must
     /// remain collinear, so this drafting operation never changes the ring area.
