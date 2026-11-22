@@ -45,6 +45,14 @@ def probe_tab_navigation(window):
     assert_status("Рабочий прототип раскроя")
     print("GUI interaction PASS: History -> Layout tabs and live status changes")
 
+    if button_named("Запуск резки (недоступен)").is_enabled():
+        raise RuntimeError("Unsafe machine-start action unexpectedly enabled")
+    print("GUI safety PASS: machine-start control remains disabled")
+
+    invoke(button_named("Отменить изменение"))
+    assert_status("Нет изменений DXF для отмены.")
+    print("GUI undo PASS: empty edit history rejected with a visible message")
+
 
 def main() -> None:
     # GitHub-hosted Windows consoles can default to a legacy codepage; the
