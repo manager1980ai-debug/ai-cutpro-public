@@ -122,6 +122,8 @@ def main() -> None:
                     )
                     return
             except Exception as exc:
+                if screenshot.is_file():
+                    raise RuntimeError("GUI interaction failed after screenshot: " + str(exc)) from exc
                 print(f"UIA probe not ready: {exc}")
             time.sleep(1)
         raise RuntimeError("AI CutPro UIA main window not discovered within 30s")
