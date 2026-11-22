@@ -1101,4 +1101,44 @@ Assert(RejectEdgeLength([editSquare],0,0,0) &&
 Assert(RejectEdgeLength([roofOutline,roofHole],0,2,6),
        "Reducing angled roof edge must reject loss of enclosed hole or crossing");
 
+// B2 absolute XY bearing editing for a straight, closed CAD contour.
+var angledSquare = PreviewVertexEditor.SetEdgeAngle([editSquare],0,0,30);
+var angledEdge = (PreviewLine)angledSquare.Rings[0].Segments[0];
+var angleLength = Math.Sqrt(
+    Math.Pow(angledEdge.End.X - angledEdge.Start.X,2) +
+    Math.Pow(angledEdge.End.Y - angledEdge.Start.Y,2));
+Assert(angledSquare.IsValidForPreview && !angledSquare.CanStartMachine &&
+       angledEdge.Start == new PreviewPoint(0,0) &&
+       Math.Abs(angledEdge.End.X - 5 * Math.Sqrt(3)) < 1e-8 &&
+       Math.Abs(angledEdge.End.Y - 5) < 1e-8 &&
+       Math.Abs(angleLength - 10) < 1e-8,
+       "SetEdgeAngle preserves edge start and length, moving its end to 30 degrees");
+var angledReopened = PreviewDxfExporter.ValidateDocument(
+    DxfReader.Parse(PreviewDxfExporter.Export(angledSquare.Rings)));
+var angledReopenedEdge = (PreviewLine)angledReopened[0].Segments[0];
+Assert(PreviewContourTopology.Analyze(angledReopened).IsValid &&
+       Math.Abs(Math.Atan2(angledReopenedEdge.End.Y - angledReopenedEdge.Start.Y,
+                           angledReopenedEdge.End.X - angledReopenedEdge.Start.X)
+                  - Math.PI / 6) < 1e-8,
+       "Requested 30 degree angle survives DXF save and reimport");
+var closingAngle = PreviewVertexEditor.SetEdgeAngle([editSquare],0,3,-90);
+Assert(PreviewContourTopology.Analyze(closingAngle.Rings).IsValid &&
+       Math.Abs(closingAngle.NetAreaMm2 - 100) < 1e-8,
+       "Closing edge supports negative clockwise bearing without topology corruption");
+static bool RejectEdgeAngle(IReadOnlyList<PreviewPath> rings,
+    int ring, int segment, double degrees)
+{
+    try { PreviewVertexEditor.SetEdgeAngle(rings,ring,segment,degrees); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectEdgeAngle([editSquare],0,0,90) &&
+       RejectEdgeAngle([editSquare],0,0,double.NaN) &&
+       RejectEdgeAngle([editSquare],0,0,double.PositiveInfinity) &&
+       RejectEdgeAngle([editSquare],0,0,361) &&
+       RejectEdgeAngle([editSquare],0,99,30) &&
+       RejectEdgeAngle([roundArcRing],0,0,30),
+       "Angle editing rejects degenerate, nonfinite, unbounded, missing and ARC input");
+Assert(RejectEdgeAngle([roofOutline,roofHole],0,2,0),
+       "Angle editing must reject edits that destroy nested hole ownership");
+
 Console.WriteLine("AI CutPro core checks passed.");
