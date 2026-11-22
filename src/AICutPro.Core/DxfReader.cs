@@ -78,12 +78,29 @@ public static class DxfReader
         string section = "";
         string? pendingSection = null;
         int? units = null;
+        var sawEof = false;
         for (int i = 0; i < pairs.Count;)
         {
             var p = pairs[i];
+            if (sawEof)
+            {
+                warnings.Add("DXF contains data after EOF.");
+                break;
+            }
+            if (p.Code == 0 && p.Value.Equals("EOF", StringComparison.OrdinalIgnoreCase))
+            {
+                sawEof = true;
+                if (section.Length > 0 || pendingSection is not null)
+                    warnings.Add("DXF EOF occurs before ENDSEC.");
+                i++;
+                continue;
+            }
             if (p.Code == 0 && p.Value.Equals("SECTION", StringComparison.OrdinalIgnoreCase))
             {
+                if (section.Length > 0 || pendingSection is not null)
+                    warnings.Add("DXF contains a nested or malformed SECTION.");
                 pendingSection = "yes";
+                section = "";
                 i++;
                 continue;
             }
@@ -96,7 +113,10 @@ public static class DxfReader
             }
             if (p.Code == 0 && p.Value.Equals("ENDSEC", StringComparison.OrdinalIgnoreCase))
             {
+                if (section.Length == 0 || pendingSection is not null)
+                    warnings.Add("DXF ENDSEC has no matching SECTION.");
                 section = "";
+                pendingSection = null;
                 i++;
                 continue;
             }
