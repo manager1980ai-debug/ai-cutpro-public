@@ -2772,4 +2772,61 @@ Assert(twoArcProfile.Segments.Count==6 &&
                 arcArcBefore.NetAreaMm2)<1e-6,
        "ARC/ARC fillet never mutates original Undo snapshot");
 
+// Stage 2 B2: one-shot horizontal/vertical geometric edge constraints.
+var horizontalSource=Document(
+    Closed("SKEW_BOTTOM",new Point2(0,0),new Point2(100,3),
+           new Point2(100,100),new Point2(0,100)),
+    new DxfCircle("AXIS_HOLE",new Point2(50,50),10));
+var horizontalRings=PreviewDxfExporter.ValidateDocument(horizontalSource);
+var beforeHorizontal=PreviewContourTopology.Analyze(horizontalRings);
+var horizontalAligned=PreviewAxisConstraintEditor.AlignEdge(
+    horizontalRings,0,0,horizontal:true);
+var alignedHorizontalEdge=(PreviewLine)horizontalAligned.Rings[0].Segments[0];
+var oldHorizontalEdge=(PreviewLine)horizontalRings[0].Segments[0];
+var oldHorizontalLength=Math.Sqrt(
+    Math.Pow(oldHorizontalEdge.End.X-oldHorizontalEdge.Start.X,2)+
+    Math.Pow(oldHorizontalEdge.End.Y-oldHorizontalEdge.Start.Y,2));
+Assert(horizontalAligned.IsValidForPreview && !horizontalAligned.CanStartMachine &&
+       Math.Abs(alignedHorizontalEdge.End.Y-alignedHorizontalEdge.Start.Y)<1e-7 &&
+       Math.Abs(alignedHorizontalEdge.End.X-oldHorizontalLength)<1e-7 &&
+       PreviewContourTopology.Analyze(horizontalAligned.Rings).IsValid &&
+       horizontalAligned.Rings[1].Segments.Count==horizontalRings[1].Segments.Count,
+       "Horizontal constraint preserves length and circle hole topology");
+PreviewDxfRoundTripVerifier.Verify(horizontalAligned.Rings,
+    PreviewDxfExporter.Export(horizontalAligned.Rings));
+
+var verticalSource=Document(
+    Closed("SKEW_RIGHT",new Point2(0,0),new Point2(100,0),
+           new Point2(103,100),new Point2(0,100)),
+    new DxfCircle("AXIS_HOLE2",new Point2(50,50),10));
+var verticalRings=PreviewDxfExporter.ValidateDocument(verticalSource);
+var verticalAligned=PreviewAxisConstraintEditor.AlignEdge(
+    verticalRings,0,1,horizontal:false);
+var alignedVerticalEdge=(PreviewLine)verticalAligned.Rings[0].Segments[1];
+var oldVerticalEdge=(PreviewLine)verticalRings[0].Segments[1];
+var oldVerticalLength=Math.Sqrt(
+    Math.Pow(oldVerticalEdge.End.X-oldVerticalEdge.Start.X,2)+
+    Math.Pow(oldVerticalEdge.End.Y-oldVerticalEdge.Start.Y,2));
+Assert(verticalAligned.IsValidForPreview && !verticalAligned.CanStartMachine &&
+       Math.Abs(alignedVerticalEdge.End.X-alignedVerticalEdge.Start.X)<1e-7 &&
+       Math.Abs(alignedVerticalEdge.End.Y-oldVerticalLength)<1e-7 &&
+       PreviewContourTopology.Analyze(verticalAligned.Rings).IsValid &&
+       verticalAligned.Rings[1].Segments.Count==verticalRings[1].Segments.Count,
+       "Vertical constraint keeps edge length and internal hole unchanged");
+PreviewDxfRoundTripVerifier.Verify(verticalAligned.Rings,
+    PreviewDxfExporter.Export(verticalAligned.Rings));
+Assert(Math.Abs(PreviewContourTopology.Analyze(horizontalRings).NetAreaMm2-
+                beforeHorizontal.NetAreaMm2)<1e-6 &&
+       Math.Abs(oldHorizontalEdge.End.Y-3)<1e-7 &&
+       Math.Abs(oldVerticalEdge.End.X-103)<1e-7,
+       "Constraint does not mutate source DXF preview / Undo snapshot");
+bool axisArcRejected=false;
+try { PreviewAxisConstraintEditor.AlignEdge(filletRings,1,0,true); }
+catch(FormatException){axisArcRejected=true;}
+Assert(axisArcRejected,"Axis constraint refuses ARC instead of distorting it");
+bool axisIndexRejected=false;
+try { PreviewAxisConstraintEditor.AlignEdge(verticalRings,0,99,false); }
+catch(FormatException){axisIndexRejected=true;}
+Assert(axisIndexRejected,"Axis constraint refuses nonexistent edge");
+
 Console.WriteLine("AI CutPro core checks passed.");
