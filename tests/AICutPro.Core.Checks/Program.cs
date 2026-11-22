@@ -3100,6 +3100,37 @@ Assert(new DxfPreviewHistory(initialLengthDxf).CurrentLengthRules.Count==0 &&
        Math.Abs(((PreviewLine)lengthSource[0].Segments[0]).End.X-100)<1e-7,
        "New DXF session has no inherited length rules and original stays unchanged");
 
+// Core CAD preview tolerance policy (not manufacturing precision).
+var defaultPreviewPolicy = PreviewGeometryTolerancePolicy.Create();
+Assert(defaultPreviewPolicy.JoinMm == 0.01 &&
+       defaultPreviewPolicy.TopologyMm == 0.01,
+       "Default core preview tolerances are explicit");
+var strictPreviewPolicy = PreviewGeometryTolerancePolicy.Create(0.0001, 0.0002);
+Assert(Math.Abs(strictPreviewPolicy.JoinMm - 0.0001) < 1e-12 &&
+       Math.Abs(strictPreviewPolicy.TopologyMm - 0.0002) < 1e-12,
+       "Independent core join and topology tolerances can be specified");
+foreach (var invalid in new [] { double.NaN, double.PositiveInfinity,
+                                 -1, 0, 1e-10, 1.001 })
+{
+    bool rejected = false;
+    try { PreviewGeometryTolerancePolicy.Create(invalid, 0.01); }
+    catch (ArgumentOutOfRangeException) { rejected = true; }
+    Assert(rejected, "Invalid core join tolerance rejected");
+    rejected = false;
+    try { PreviewGeometryTolerancePolicy.Create(0.01, invalid); }
+    catch (ArgumentOutOfRangeException) { rejected = true; }
+    Assert(rejected, "Invalid core topology tolerance rejected");
+}
+var checkedContour = tangentFillet.Rings[0];
+Assert(defaultPreviewPolicy.ValidateContour(checkedContour)
+           .SequenceEqual(PreviewContourValidator.Validate(checkedContour, 0.01)),
+       "Explicit tolerance policy delegates to the existing contour checker");
+Assert(defaultPreviewPolicy.Analyze(tangentFillet.Rings).IsValid ==
+       PreviewContourTopology.Analyze(tangentFillet.Rings, 0.01).IsValid,
+       "Core tolerance policy preserves topology validity at default settings");
+Assert(!defaultPreviewPolicy.Analyze(tangentFillet.Rings).CanStartMachine,
+       "Preview tolerance configuration cannot authorize machine motion");
+
 // Optional independent-parser fixture export for CI. All source data
 // comes from already verified CAD preview geometry; another implementation
 // (ezdxf) independently parses and measures the serialized DXF entities.
