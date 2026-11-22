@@ -2549,4 +2549,46 @@ Assert(filletRings[0].Segments.Count==4 &&
                 filletBefore.NetAreaMm2)<1e-6,
        "Fillet leaves source DXF unchanged for Undo and failed operations");
 
+// B2 concave fillet: U-shaped notch in a CCW plate. The tangent ARC at
+// the inside notch corner is clockwise, adds R^2(1-pi/4) to material,
+// and must neither move nor consume an unrelated round hole.
+var notchSource=Document(
+    Closed("NOTCH_PLATE",new Point2(0,0),new Point2(100,0),
+        new Point2(100,100),new Point2(60,100),new Point2(60,40),
+        new Point2(40,40),new Point2(40,100),new Point2(0,100)),
+    new DxfCircle("NOTCH_HOLE",new Point2(20,20),5));
+var notchPaths=PreviewDxfExporter.ValidateDocument(notchSource);
+var notchBefore=PreviewContourTopology.Analyze(notchPaths);
+Assert(notchBefore.IsValid && notchPaths.Count==2,
+       "U-notch and independent circular hole form valid source topology");
+var notchFillet=PreviewCornerFilletEditor.FilletVertex(notchPaths,0,4,10);
+var notchAfter=PreviewContourTopology.Analyze(notchFillet.Rings);
+var notchArc=notchFillet.Rings[0].Segments.OfType<PreviewArc>().Single();
+Assert(notchFillet.IsValidForPreview && !notchFillet.CanStartMachine &&
+       notchAfter.IsValid && notchAfter.Rings.Count==2 &&
+       notchFillet.Rings[0].Segments.Count==9 &&
+       Math.Abs(notchArc.Center.X-50)<1e-7 &&
+       Math.Abs(notchArc.Center.Y-50)<1e-7 &&
+       Math.Abs(notchArc.RadiusMm-10)<1e-7 &&
+       Math.Abs(notchArc.SweepDegrees+90)<1e-7 &&
+       Math.Abs(notchAfter.NetAreaMm2-
+            (notchBefore.NetAreaMm2+100*(1-Math.PI/4)))<1e-5 &&
+       notchFillet.Rings[1].Segments.Count==notchPaths[1].Segments.Count,
+       "Concave inside corner becomes clockwise quarter-ARC and increases area");
+var notchRoundtrip=PreviewDxfRoundTripVerifier.Verify(
+    notchFillet.Rings,PreviewDxfExporter.Export(notchFillet.Rings));
+Assert(PreviewContourTopology.Analyze(notchRoundtrip).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(notchRoundtrip).NetAreaMm2-
+           notchAfter.NetAreaMm2)<1e-5,
+       "Concave fillet survives exact DXF round-trip");
+bool tooLargeNotchFilletRejected=false;
+try { PreviewCornerFilletEditor.FilletVertex(notchPaths,0,4,21); }
+catch(FormatException) { tooLargeNotchFilletRejected=true; }
+Assert(tooLargeNotchFilletRejected,
+       "Concave fillet exceeding the notch edge is rejected");
+Assert(notchPaths[0].Segments.Count==8 &&
+       Math.Abs(PreviewContourTopology.Analyze(notchPaths).NetAreaMm2-
+           notchBefore.NetAreaMm2)<1e-6,
+       "Concave edit never mutates original DXF source");
+
 Console.WriteLine("AI CutPro core checks passed.");
