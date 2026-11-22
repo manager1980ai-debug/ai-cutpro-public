@@ -82,6 +82,10 @@
           <TextBox x:Name="TextSketchBox" Text="PLATE 200 100 5; HOLE 50 50 10"
                    TextWrapping="Wrap" AcceptsReturn="True" Height="64"/>
           <Button Content="Построить пластину (2D + параметры 3D)" Click="BuildTextSketchClicked"/>
+          <TextBlock Text="3D-модель из текущего отредактированного DXF" Foreground="#E8F4FF" FontWeight="Bold"/>
+          <TextBox x:Name="Current3DThicknessBox" Text="5" Watermark="Толщина 3D, мм"/>
+          <Button Content="Экспорт текущего DXF в 3D (.scad)" Click="ExportCurrentDxf3DClicked"/>
+          <TextBlock Text="Использует текущие изменения DXF, включая Undo/Redo. Поддерживается одна деталь с прямыми рёбрами и круглыми отверстиями. Иная геометрия отклоняется, CAM запрещён." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Сохранить 3D-модель OpenSCAD (.scad)" Click="ExportPlate3DClicked"/>
           <TextBlock Text="3D-файл строится из текстовых параметров PLATE/HOLE, а не из последующих правок DXF. Открыть и визуализировать можно в OpenSCAD; это не CAM и не STL." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Команды: PLATE ширина высота толщина; HOLE X Y радиус. Только параметрическая модель, без 3D-меша и резки." Foreground="#9CB3C9" TextWrapping="Wrap"/>
