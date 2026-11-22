@@ -2,22 +2,26 @@ namespace AICutPro.Core;
 
 /// <summary>
 /// Explicit, bounded tolerances for CAD preview validation in millimetres.
-/// Does not alter the analytic intersection checker's fixed internal epsilon,
-/// authorize CAM output, or describe a machine's positioning accuracy.
+/// Controls analytic preview intersection thresholds, but cannot authorize CAM
+/// output or describe a machine's positioning accuracy.
 /// </summary>
 public sealed class PreviewGeometryTolerancePolicy
 {
     public double JoinMm { get; }
     public double TopologyMm { get; }
+    public double IntersectionMm { get; }
 
-    private PreviewGeometryTolerancePolicy(double joinMm, double topologyMm)
+    private PreviewGeometryTolerancePolicy(double joinMm, double topologyMm,
+        double intersectionMm)
     {
         JoinMm = joinMm;
         TopologyMm = topologyMm;
+        IntersectionMm = intersectionMm;
     }
 
     public static PreviewGeometryTolerancePolicy Create(
-        double joinMm = 0.01, double topologyMm = 0.01)
+        double joinMm = 0.01, double topologyMm = 0.01,
+        double intersectionMm = 1e-7)
     {
         static void RequireValid(double value, string name)
         {
@@ -27,17 +31,20 @@ public sealed class PreviewGeometryTolerancePolicy
         }
         RequireValid(joinMm, nameof(joinMm));
         RequireValid(topologyMm, nameof(topologyMm));
-        return new(joinMm, topologyMm);
+        if (!double.IsFinite(intersectionMm) || intersectionMm < 1e-9 || intersectionMm > 0.01)
+            throw new ArgumentOutOfRangeException(nameof(intersectionMm),
+                "Intersection tolerance must be finite and in [1e-9, 0.01] mm.");
+        return new(joinMm, topologyMm, intersectionMm);
     }
 
     public IReadOnlyList<string> ValidateContour(PreviewPath path) =>
-        PreviewContourValidator.Validate(path, JoinMm);
+        PreviewContourValidator.Validate(path, JoinMm, IntersectionMm);
 
     public IReadOnlyList<string> ValidatePair(PreviewPath first, PreviewPath second) =>
-        PreviewContourValidator.ValidatePair(first, second, TopologyMm);
+        PreviewContourValidator.ValidatePair(first, second, TopologyMm, IntersectionMm);
 
     public PreviewTopologyResult Analyze(IReadOnlyList<PreviewPath> paths) =>
-        PreviewContourTopology.Analyze(paths, TopologyMm);
+        PreviewContourTopology.Analyze(paths, TopologyMm, IntersectionMm);
 
     /// <summary>
     /// Full preview-only drawing inspection with explicit tolerances. Rejects
