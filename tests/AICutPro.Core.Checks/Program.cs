@@ -710,6 +710,51 @@ foreach(var name in new[]{"cadcraft-sample-bracket.dxf","cadcraft-sample-floorpl
            !fixtureGate.CanGenerateMachineCommands,
            $"External DXF {name} refuses unconfirmed millimetre CAM geometry");
 }
+// Expanded external-fixture regression: conversion must NEVER launder an
+// unsupported-entity warning into a manufacturing-ready DXF. The two source
+// files are independently authored CADCraft samples, not production drawings.
+foreach(var filename in new[]{"cadcraft-sample-bracket.dxf",
+                              "cadcraft-sample-floorplan.dxf"})
+{
+    var bytes=File.ReadAllBytes(Path.Combine("tests","fixtures",filename));
+    var original=DxfFileReader.Read(bytes);
+    Assert(original.Document.InsUnits==1 && original.Document.Warnings.Count>1,
+        "External DXF includes imperial units and separate unsupported-entity warnings");
+    var scaled=DxfUnitConverter.ToMillimetres(original.Document,1);
+    var expectedWarnings=original.Document.Warnings.Where(w =>
+        w!="DXF $INSUNITS=1. Only millimetres (4) may be used in cutting jobs without conversion.")
+        .ToArray();
+    Assert(scaled.Document.InsUnits==4 &&
+           scaled.Document.Warnings.SequenceEqual(expectedWarnings) &&
+           scaled.Document.Warnings.Count>0,
+        "Real-file unit scaling preserves all unsupported-entity warnings verbatim");
+    var denied=GeometryPreflight.Inspect(scaled.Document,new Sheet(100_000,100_000));
+    Assert(denied.Status==GeometryPreflightStatus.Rejected &&
+           !denied.CanGenerateMachineCommands,
+        "Real-file warning cannot be bypassed by explicit inch-to-mm conversion");
+    bool exporterDenied=false;
+    try { PreviewDxfExporter.ValidateDocument(scaled.Document); }
+    catch(FormatException) { exporterDenied=true; }
+    Assert(exporterDenied,"Real-file geometry-only export refuses partially imported drawings");
+    // Check the reader detects corruption in the authentic byte sequence,
+    // not just in miniature synthetic DXF fragments.
+    var corrupted=(byte[])bytes.Clone();
+    corrupted[20]=0; // binary NUL injection in original ASCII DXF data
+    bool corruptionDenied=false;
+    try { DxfFileReader.Read(corrupted); }
+    catch(FormatException) {corruptionDenied=true;}
+    Assert(corruptionDenied,"Real DXF with binary corruption is rejected");
+}
+// A warning that merely begins like a units warning must not be deleted.
+var forgedWarning=new DxfImportResult([
+    new DxfCircle("CUT",new Point2(50,50),10)],
+    ["DXF $INSUNITS=1. Only millimetres (4) may be used in cutting jobs without conversion.",
+     "DXF $INSUNITS=1. Unexpected additional validation problem."],1);
+var forgedResult=DxfUnitConverter.ToMillimetres(forgedWarning,1);
+Assert(forgedResult.Document.Warnings.Count==1 &&
+       forgedResult.Document.Warnings[0].Contains("Unexpected additional validation problem"),
+    "Unit conversion removes only the exact known units notice, not warning prefixes");
+
 // Explicit scale conversion never guesses missing/contradictory DXF units.
 var imperialDocument=new DxfImportResult([
     new DxfLine("CUT",new Point2(1,2),new Point2(3,4)),
