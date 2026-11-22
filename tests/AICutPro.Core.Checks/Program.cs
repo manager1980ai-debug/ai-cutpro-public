@@ -1030,4 +1030,38 @@ Assert(RejectVertexDeletion([editSquare],0,99) &&
        RejectVertexDeletion([roundArcRing],0,0),
        "Deletion rejects invalid indices, triangles and arc rings");
 
+// A valid edited polygon must not silently reclassify a previously nested
+// hole as an independent part. This applies even without intersecting edges.
+var roofOutline = new PreviewPath([
+    new PreviewLine(new(0,0),new(20,0)),
+    new PreviewLine(new(20,0),new(20,20)),
+    new PreviewLine(new(20,20),new(10,30)),
+    new PreviewLine(new(10,30),new(0,20)),
+    new PreviewLine(new(0,20),new(0,0))
+],true);
+var roofHole = new PreviewPath([
+    new PreviewLine(new(9,22),new(11,22)),
+    new PreviewLine(new(11,22),new(11,24)),
+    new PreviewLine(new(11,24),new(9,24)),
+    new PreviewLine(new(9,24),new(9,22))
+],true);
+var nestedRoof = PreviewContourTopology.Analyze([roofOutline,roofHole]);
+Assert(nestedRoof.IsValid && nestedRoof.Rings[1].ParentIndex==0 &&
+       !nestedRoof.Rings[1].IsMaterialBoundary,
+       "Initial roof geometry contains an inner hole");
+Assert(RejectVertexDeletion([roofOutline,roofHole],0,3),
+       "Deleting outer apex cannot silently change a hole to a separate part");
+Assert(RejectVertexEdit([roofOutline,roofHole],0,3,new PreviewPoint(10,19)),
+       "Moving apex cannot silently convert a hole into a separate part");
+var safeRoofMove = PreviewVertexEditor.MoveVertex(
+    [roofOutline,roofHole],0,3,new PreviewPoint(10,32));
+var safeRoofTopology = PreviewContourTopology.Analyze(safeRoofMove.Rings);
+Assert(safeRoofTopology.IsValid && safeRoofTopology.Rings[1].ParentIndex==0 &&
+       !safeRoofTopology.Rings[1].IsMaterialBoundary,
+       "Safe outline edit retains exactly the original hole ownership");
+var safeRoofRoundTrip = PreviewDxfExporter.ValidateDocument(
+    DxfReader.Parse(PreviewDxfExporter.Export(safeRoofMove.Rings)));
+Assert(PreviewContourTopology.Analyze(safeRoofRoundTrip).Rings[1].ParentIndex==0,
+       "Nested-hole ownership survives verified DXF export/import");
+
 Console.WriteLine("AI CutPro core checks passed.");
