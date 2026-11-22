@@ -39,6 +39,8 @@
           <TextBox x:Name="DxfUnitsBox" Watermark="1=дюйм, 2=фут, 4=мм, 5=см, 6=м"/>
           <TextBlock Text="Пустое поле: только исходный просмотр, без пересчёта. Единицы не угадываются." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Открыть DXF (предпросмотр)" Click="ImportDxfClicked"/>
+          <Button Content="Диагностика DXF (все замечания)" Click="ShowDxfDiagnosticsClicked"/>
+          <TextBlock Text="Полный список ошибок, коды, объяснения и способы исправления доступны без подключения к ИИ." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="История изменений DXF (до 30 шагов)" Foreground="#E8F4FF" FontWeight="Bold"/>
           <Grid ColumnDefinitions="*,*">
             <Button Grid.Column="0" Content="Отменить изменение" Click="UndoDxfClicked"/>
