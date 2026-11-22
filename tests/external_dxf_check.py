@@ -76,6 +76,112 @@ def check_line_intersections(entities, tolerance=1e-7):
                     raise AssertionError("Non-endpoint DXF LINE intersection")
 
 
+
+def _on_arc(arc, point, tolerance=1e-7):
+    center = (float(arc.dxf.center.x), float(arc.dxf.center.y))
+    radius = float(arc.dxf.radius)
+    if not math.isclose(math.dist(center, point), radius,
+                        abs_tol=tolerance, rel_tol=0):
+        return False
+    start = float(arc.dxf.start_angle) % 360
+    sweep = (float(arc.dxf.end_angle) - start) % 360
+    angle = math.degrees(math.atan2(point[1]-center[1],
+                                     point[0]-center[0])) % 360
+    return (angle-start) % 360 <= sweep + math.degrees(tolerance/radius)
+
+
+def _arc_circle_intersections(first, second, tolerance=1e-7):
+    c1 = (float(first.dxf.center.x), float(first.dxf.center.y))
+    c2 = (float(second.dxf.center.x), float(second.dxf.center.y))
+    r1, r2 = float(first.dxf.radius), float(second.dxf.radius)
+    delta = _subtract(c2, c1)
+    distance = math.hypot(*delta)
+    if distance <= tolerance:
+        if abs(r1-r2) > tolerance:
+            return []
+        # Coincident circles: detect positive shared angular intervals,
+        # not merely an endpoint. A midpoint of each arc is sufficient
+        # when combined with checks of all endpoint angles.
+        candidates = [_endpoints(first)[0], _endpoints(first)[1],
+                      _endpoints(second)[0], _endpoints(second)[1]]
+        a_start = float(first.dxf.start_angle)
+        a_sweep = (float(first.dxf.end_angle)-a_start) % 360
+        b_start = float(second.dxf.start_angle)
+        b_sweep = (float(second.dxf.end_angle)-b_start) % 360
+        for start, sweep, arc in [(a_start, a_sweep, second),
+                                  (b_start, b_sweep, first)]:
+            for fraction in (0.25, 0.5, 0.75):
+                angle = math.radians(start + sweep*fraction)
+                point = (c1[0]+r1*math.cos(angle),
+                         c1[1]+r1*math.sin(angle))
+                if _on_arc(arc, point, tolerance):
+                    raise AssertionError("Overlapping coincident DXF ARC edges")
+        return [p for p in candidates if _on_arc(first,p,tolerance)
+                and _on_arc(second,p,tolerance)]
+    if distance > r1+r2+tolerance or distance < abs(r1-r2)-tolerance:
+        return []
+    along = (r1*r1-r2*r2+distance*distance)/(2*distance)
+    height_sq = r1*r1-along*along
+    if height_sq < -tolerance*max(r1*r1,1):
+        return []
+    height = math.sqrt(max(0, height_sq))
+    ux, uy = delta[0]/distance, delta[1]/distance
+    base = (c1[0]+along*ux, c1[1]+along*uy)
+    points = [(base[0]-height*uy,base[1]+height*ux),
+              (base[0]+height*uy,base[1]-height*ux)]
+    return [p for p in points if _on_arc(first,p,tolerance)
+            and _on_arc(second,p,tolerance)]
+
+
+def _line_arc_intersections(line, arc, tolerance=1e-7):
+    start, end = _endpoints(line)
+    c = (float(arc.dxf.center.x),float(arc.dxf.center.y))
+    d, f = _subtract(end,start), _subtract(start,c)
+    aa = d[0]*d[0]+d[1]*d[1]
+    if aa <= tolerance*tolerance:
+        raise AssertionError("Degenerate DXF LINE")
+    bb = 2*(f[0]*d[0]+f[1]*d[1])
+    cc = f[0]*f[0]+f[1]*f[1]-float(arc.dxf.radius)**2
+    discriminant = bb*bb-4*aa*cc
+    if discriminant < -tolerance*max(aa,1):
+        return []
+    root = math.sqrt(max(0,discriminant))
+    points = []
+    for t in ((-bb-root)/(2*aa),(-bb+root)/(2*aa)):
+        if -tolerance/math.sqrt(aa) <= t <= 1+tolerance/math.sqrt(aa):
+            p = (start[0]+d[0]*t,start[1]+d[1]*t)
+            if _on_arc(arc,p,tolerance):
+                points.append(p)
+    return points
+
+
+def check_curved_intersections(entities, tolerance=1e-7):
+    """Independent analytic LINE/ARC and ARC/ARC cross and tangent checks.
+
+    Only common endpoints may touch. Identical circles with overlapping
+    angular intervals are rejected; this is not a hole-nesting certificate.
+    """
+    for i, first in enumerate(entities):
+        for second in entities[i+1:]:
+            if first.dxftype() == second.dxftype() == "LINE":
+                continue
+            if first.dxftype() == "ARC" and second.dxftype() == "ARC":
+                points = _arc_circle_intersections(first, second, tolerance)
+            else:
+                line = first if first.dxftype() == "LINE" else second
+                arc = first if first.dxftype() == "ARC" else second
+                points = _line_arc_intersections(line,arc,tolerance)
+            first_ends = _endpoints(first)
+            second_ends = _endpoints(second)
+            for point in points:
+                is_first_end = any(math.dist(point,p) <= tolerance
+                                   for p in first_ends)
+                is_second_end = any(math.dist(point,p) <= tolerance
+                                    for p in second_ends)
+                if not (is_first_end and is_second_end):
+                    raise AssertionError("Non-endpoint DXF curved intersection")
+
+
 def check_closed_contour_graph(entities, tolerance=1e-5):
     """Every exported LINE/ARC endpoint must have exactly two incident edges.
 
@@ -176,6 +282,36 @@ def run_negative_graph_regressions():
     touching.add_line((0, 0), (10, 0))
     touching.add_line((10, 0), (10, 10))
     check_line_intersections(list(touching))
+    def expect_curved_reject(entities, label):
+        try:
+            check_curved_intersections(entities)
+        except AssertionError:
+            return
+        raise AssertionError("Negative regression: " + label)
+    line_arc_cross = ezdxf.new().modelspace()
+    line_arc_cross.add_line((-15, 0), (15, 0))
+    line_arc_cross.add_arc((0, 0), 10, 0, 180)
+    expect_curved_reject(list(line_arc_cross), "LINE/ARC crossing accepted")
+    line_arc_tangent = ezdxf.new().modelspace()
+    line_arc_tangent.add_line((-15, 10), (15, 10))
+    line_arc_tangent.add_arc((0, 0), 10, 0, 180)
+    expect_curved_reject(list(line_arc_tangent), "interior tangent accepted")
+    shared_endpoint = ezdxf.new().modelspace()
+    shared_endpoint.add_line((10, 0), (20, 0))
+    shared_endpoint.add_arc((0, 0), 10, 0, 90)
+    check_curved_intersections(list(shared_endpoint))
+    arc_arc_cross = ezdxf.new().modelspace()
+    arc_arc_cross.add_arc((0, 0), 10, 0, 180)
+    arc_arc_cross.add_arc((10, 0), 10, 0, 180)
+    expect_curved_reject(list(arc_arc_cross), "ARC/ARC crossing accepted")
+    arc_overlap = ezdxf.new().modelspace()
+    arc_overlap.add_arc((0, 0), 10, 0, 140)
+    arc_overlap.add_arc((0, 0), 10, 80, 180)
+    expect_curved_reject(list(arc_overlap), "coincident arc overlap accepted")
+    separate_arcs = ezdxf.new().modelspace()
+    separate_arcs.add_arc((0, 0), 10, 0, 90)
+    separate_arcs.add_arc((40, 0), 10, 0, 90)
+    check_curved_intersections(list(separate_arcs))
 
 
 def check_sample(root: pathlib.Path, case: dict) -> None:
@@ -200,6 +336,7 @@ def check_sample(root: pathlib.Path, case: dict) -> None:
 
     vertex_count, edge_count = check_closed_contour_graph(entities)
     check_line_intersections(entities)
+    check_curved_intersections(entities)
     radii = []
     perimeter = 0.0
     for entity in entities:
