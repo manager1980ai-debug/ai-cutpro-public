@@ -6,6 +6,38 @@ static void Assert(bool condition, string message)
     if (!condition) throw new Exception("CHECK FAILED: " + message);
 }
 
+// B1.1: the offline diagnostic knowledge base is stable, localised and
+// provides honest in-app guidance without claiming unavailable repair tools.
+var diagnosticCodes = DxfDiagnosticCatalog.All.Select(e => e.Code).ToArray();
+Assert(diagnosticCodes.Distinct(StringComparer.Ordinal).Count() == diagnosticCodes.Length &&
+       diagnosticCodes.Length >= 5, "DXF diagnostic identifiers unique");
+foreach (var entry in DxfDiagnosticCatalog.All)
+    Assert(!string.IsNullOrWhiteSpace(entry.TitleRu) &&
+           !string.IsNullOrWhiteSpace(entry.TitleEn) &&
+           !string.IsNullOrWhiteSpace(entry.ExplanationRu) &&
+           !string.IsNullOrWhiteSpace(entry.ExplanationEn) &&
+           !string.IsNullOrWhiteSpace(entry.AdviceRu) &&
+           !string.IsNullOrWhiteSpace(entry.AdviceEn) &&
+           !entry.RepairAvailable,
+           "Every DXF diagnostic has RU/EN explanations and honest repair status");
+Assert(DxfDiagnosticCatalog.Classify(
+    new FormatException("Truncated DXF group pair.")).Code == "DXF-1003",
+    "Malformed DXF resolves to stable structure-error code");
+Assert(DxfDiagnosticCatalog.Classify(
+    new FormatException("Binary DXF is not supported; export as ASCII DXF.")).Code == "DXF-1002",
+    "Binary DXF resolves to format error code");
+Assert(DxfDiagnosticCatalog.Classify(
+    new FormatException("Unsupported DXF $DWGCODEPAGE=ANSI_99999; choose an explicitly supported encoding.")).Code == "DXF-1004",
+    "Unsupported code page resolves to encoding diagnostic");
+Assert(DxfDiagnosticCatalog.Classify(
+    new FormatException("DXF file must contain 1..8000000 bytes.")).Code == "DXF-1001",
+    "Size errors receive explicit diagnostic code");
+Assert(DxfDiagnosticCatalog.Classify(new IOException("read error")).Code == "DXF-1099",
+    "Unknown exceptions are not mistaken for a repairable format problem");
+Assert(DxfDiagnosticCatalog.ExplainRu(
+    new FormatException("Truncated DXF pair")).Contains("Что делать:",StringComparison.Ordinal),
+    "Import diagnostic includes actionable advice in Russian");
+
 // Project format: round trip, unsupported versions, and malformed dimensions.
 var project = CutProject.CreateDefault() with
 {
