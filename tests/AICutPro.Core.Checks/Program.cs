@@ -3130,6 +3130,17 @@ Assert(defaultPreviewPolicy.Analyze(tangentFillet.Rings).IsValid ==
        "Core tolerance policy preserves topology validity at default settings");
 Assert(!defaultPreviewPolicy.Analyze(tangentFillet.Rings).CanStartMachine,
        "Preview tolerance configuration cannot authorize machine motion");
+Assert(defaultPreviewPolicy.ValidateDrawing(tangentFillet.Rings).IsValid ==
+       defaultPreviewPolicy.Analyze(tangentFillet.Rings).IsValid,
+       "Full drawing check preserves default topology for existing geometry");
+Assert(!defaultPreviewPolicy.ValidateDrawing(tangentFillet.Rings).CanStartMachine,
+       "Full drawing validation never enables machine motion");
+Assert(!defaultPreviewPolicy.ValidateDrawing(Array.Empty<PreviewPath>()).IsValid,
+       "Drawing validation rejects empty input");
+Assert(!defaultPreviewPolicy.ValidateDrawing(
+           new PreviewPath[] { null! }).IsValid,
+       "Drawing validation rejects null rings without throwing");
+
 
 // Optional independent-parser fixture export for CI. All source data
 // comes from already verified CAD preview geometry; another implementation
