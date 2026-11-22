@@ -58,6 +58,11 @@
           <Button Content="Зеркально отразить по вертикали" Click="MirrorWholeDxfClicked"/>
           <TextBox x:Name="MirrorAxisYBox" Text="0" Watermark="Горизонтальная ось отражения, Y мм"/>
           <Button Content="Зеркально отразить по горизонтали" Click="MirrorHorizontalDxfClicked"/>
+          <TextBlock Text="Пропорциональное масштабирование всего DXF (предпросмотр)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <TextBox x:Name="ScaleFactorBox" Text="1" Watermark="Коэффициент масштаба (0.01–100)"/>
+          <TextBox x:Name="ScalePivotXBox" Text="0" Watermark="Центр масштабирования X, мм"/>
+          <TextBox x:Name="ScalePivotYBox" Text="0" Watermark="Центр масштабирования Y, мм"/>
+          <Button Content="Применить масштаб ко всем контурам" Click="ScaleWholeDxfClicked"/>
           <TextBlock Text="Операции меняют текущий предпросмотр и добавляются в историю Undo/Redo. Применённые смещение/поворот автоматически сбрасываются в 0, чтобы экспорт не повторил их. CAM и запуск станка запрещены." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Вершина прямолинейного контура (нумерация с 1)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditRingIndexBox" Text="1" Watermark="Номер контура"/>
