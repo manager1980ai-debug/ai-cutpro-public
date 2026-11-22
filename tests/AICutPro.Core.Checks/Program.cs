@@ -2628,4 +2628,47 @@ Assert(filleted.Rings[0].Segments.Count==5 &&
        filleted.Rings[0].Segments.OfType<PreviewArc>().Count()==1,
        "Second fillet cannot mutate original DXF history snapshot");
 
+// B2: exact tangent addition at a LINE -> clockwise ARC junction.
+// All geometry is synthetic drafting-only and remains non-executable.
+var lineArcBase=new PreviewPath(new PreviewSegment[]{
+    new PreviewLine(new PreviewPoint(0,0),new PreviewPoint(100,0)),
+    new PreviewArc(new PreviewPoint(120,0),20,180,-90),
+    new PreviewLine(new PreviewPoint(120,20),new PreviewPoint(120,100)),
+    new PreviewLine(new PreviewPoint(120,100),new PreviewPoint(0,100)),
+    new PreviewLine(new PreviewPoint(0,100),new PreviewPoint(0,0))
+},true);
+var lineArcRings=new PreviewPath[]{lineArcBase,filletRings[1]};
+var lineArcBefore=PreviewContourTopology.Analyze(lineArcRings);
+Assert(lineArcBefore.IsValid,"LINE/ARC synthetic source with a hole is valid");
+var tangentFillet=PreviewLineArcFilletEditor.FilletIncomingLine(
+    lineArcRings,0,1,5);
+var tangentTopology=PreviewContourTopology.Analyze(tangentFillet.Rings);
+var tangentArcs=tangentFillet.Rings[0].Segments.OfType<PreviewArc>().ToArray();
+Assert(tangentFillet.IsValidForPreview && !tangentFillet.CanStartMachine &&
+       tangentTopology.IsValid && tangentFillet.Rings[0].Segments.Count==6 &&
+       tangentArcs.Length==2 &&
+       tangentArcs.Any(a=>Math.Abs(a.RadiusMm-5)<1e-6) &&
+       tangentArcs.Any(a=>Math.Abs(a.RadiusMm-20)<1e-6) &&
+       tangentFillet.Rings[1].Segments.Count==lineArcRings[1].Segments.Count,
+       "Incoming LINE to clockwise ARC fillet retains source analytic ARC and hole");
+var tangentRoundTrip=PreviewDxfRoundTripVerifier.Verify(
+    tangentFillet.Rings,PreviewDxfExporter.Export(tangentFillet.Rings));
+Assert(PreviewContourTopology.Analyze(tangentRoundTrip).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(tangentRoundTrip).NetAreaMm2-
+           tangentTopology.NetAreaMm2)<1e-5,
+       "New tangent LINE/ARC fillet passes exact DXF round-trip");
+foreach(var invalid in new[]{double.NaN,double.PositiveInfinity,0d,-1d,1_000_001d})
+{
+    bool rejected=false;
+    try { PreviewLineArcFilletEditor.FilletIncomingLine(lineArcRings,0,1,invalid); }
+    catch(FormatException){ rejected=true; }
+    Assert(rejected,"Invalid LINE/ARC fillet radius fails before geometry changes");
+}
+bool wrongArcIndexRejected=false;
+try { PreviewLineArcFilletEditor.FilletIncomingLine(lineArcRings,0,2,5); }
+catch(FormatException){ wrongArcIndexRejected=true; }
+Assert(wrongArcIndexRejected,"LINE/ARC fillet refuses unsupported segment selection");
+Assert(lineArcBase.Segments.Count==5,
+       "LINE/ARC fillet preserves source preview for Undo");
+
 Console.WriteLine("AI CutPro core checks passed.");
