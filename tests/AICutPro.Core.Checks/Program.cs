@@ -2140,6 +2140,42 @@ Assert(rigidRotated.IsValidForPreview && rotatedTopo.IsValid &&
 PreviewDxfRoundTripVerifier.Verify(rigidRotated.Rings,
     PreviewDxfExporter.Export(rigidRotated.Rings));
 
+// B2: a selected, non-origin pivot must stay fixed while LINE/ARC
+// boundaries rotate rigidly around it; inverse restores exact topology.
+var selectedPivot = new PreviewPoint(100,100);
+var pivotRotated = PreviewRigidTransformEditor.Rotate(
+    rigidPaths,selectedPivot,90);
+var pivotTopology = PreviewContourTopology.Analyze(pivotRotated.Rings);
+Assert(pivotTopology.IsValid && pivotTopology.Rings.Count==2 &&
+       pivotRotated.Rings.SelectMany(p=>p.Segments)
+           .OfType<PreviewArc>().All(a=>
+               Math.Abs(a.Center.X-selectedPivot.X)<1e-7 &&
+               Math.Abs(a.Center.Y-selectedPivot.Y)<1e-7) &&
+       pivotRotated.Rings.SelectMany(p=>p.Segments)
+           .OfType<PreviewLine>().Any(l=>
+               Math.Abs(l.Start.X-200)<1e-7 &&
+               Math.Abs(l.Start.Y-0)<1e-7) &&
+       Math.Abs(pivotTopology.NetAreaMm2-rigidArea)<1e-6 &&
+       !pivotRotated.CanStartMachine,
+       "Non-origin rotation pivot remains fixed and material/hole geometry is preserved");
+var pivotRestored = PreviewRigidTransformEditor.Rotate(
+    pivotRotated.Rings,selectedPivot,-90);
+var pivotReopened = PreviewDxfRoundTripVerifier.Verify(
+    pivotRestored.Rings,PreviewDxfExporter.Export(pivotRestored.Rings));
+Assert(PreviewContourTopology.Analyze(pivotReopened).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(pivotReopened).NetAreaMm2-rigidArea)<1e-6 &&
+       pivotReopened.Count==rigidPaths.Count,
+       "Non-origin pivot rotation and inverse survive exact DXF round-trip");
+bool badPivotRejected = false;
+try
+{
+    PreviewRigidTransformEditor.Rotate(
+        rigidPaths,new PreviewPoint(double.NaN,0),90);
+}
+catch(FormatException) { badPivotRejected = true; }
+Assert(badPivotRejected,
+       "Invalid rotation pivot coordinates must fail without changing the DXF");
+
 var rigidMirrored = PreviewRigidTransformEditor.MirrorVertical(rigidPaths,150);
 var mirrorTopo = PreviewContourTopology.Analyze(rigidMirrored.Rings);
 Assert(rigidMirrored.IsValidForPreview && mirrorTopo.IsValid &&
