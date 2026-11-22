@@ -14,7 +14,7 @@ from shapely.geometry import LineString
 from shapely.ops import polygonize, unary_union
 
 
-def segment_coords(entity):
+def segment_coords(entity, max_arc_step_deg=0.5):
     kind = entity.dxftype()
     if kind == "LINE":
         a, b = entity.dxf.start, entity.dxf.end
@@ -29,7 +29,9 @@ def segment_coords(entity):
     if not (0 < sweep < 360 and math.isfinite(radius) and radius > 0):
         raise AssertionError("Invalid ARC in independent geometry input")
     # Half-degree max chord angle; this is intentionally not exact arc geometry.
-    pieces = max(1, math.ceil(sweep / 0.5))
+    if not (math.isfinite(max_arc_step_deg) and 0.1 <= max_arc_step_deg <= 5):
+        raise ValueError("Arc tessellation step must be in [0.1, 5] degrees")
+    pieces = max(1, math.ceil(sweep / max_arc_step_deg))
     return [
         (round(center.x + radius * math.cos(math.radians(start + sweep*i/pieces)), 9),
          round(center.y + radius * math.sin(math.radians(start + sweep*i/pieces)), 9))
@@ -37,18 +39,55 @@ def segment_coords(entity):
     ]
 
 
-def _geos_faces(folder, filename):
+def _geos_faces(folder, filename, max_arc_step_deg=0.5):
     drawing = ezdxf.readfile(folder / filename)
     if drawing.header.get("$INSUNITS") != 4:
         raise AssertionError(f"{filename}: expected millimetre DXF")
     entities = list(drawing.modelspace())
     if not entities or any(e.dxftype() not in ("LINE", "ARC") for e in entities):
         raise AssertionError(f"{filename}: unsupported geometry for GEOS test")
-    linework = [LineString(segment_coords(e)) for e in entities]
+    linework = [LineString(segment_coords(e, max_arc_step_deg)) for e in entities]
     faces = list(polygonize(unary_union(linework)))
     if not faces or not all(face.is_valid for face in faces):
         raise AssertionError(f"{filename}: invalid polygonization result")
     return faces
+
+
+
+def check_arc_tessellation_convergence(folder):
+    """Independent area convergence across four ARC tessellation resolutions.
+
+    The test detects incorrect sweep direction, lost arcs and major radius
+    errors. GEOS polygons are approximations; analytic math is the oracle.
+    """
+    file = "constrained_rectangle_with_hole.dxf"
+    analytic = 110 * 90 - math.pi * 10**2
+    errors = []
+    for step in (2.0, 1.0, 0.5, 0.25):
+        faces = _geos_faces(folder, file, step)
+        if len(faces) != 2:
+            raise AssertionError(f"{file}: wrong GEOS topology at {step} degrees")
+        material = max(faces, key=lambda f: f.area)
+        if len(material.interiors) != 1 or not material.is_valid:
+            raise AssertionError(f"{file}: hole topology unstable at {step} degrees")
+        error = abs(material.area - analytic)
+        errors.append(error)
+        # For an inscribed R10 circle with maximum angular step t radians,
+        # polygon area deficit <= 2*pi*R^2*(1-sin(t)/t).
+        t = math.radians(step)
+        deficit_bound = 2 * math.pi * 10**2 * (1 - math.sin(t) / t)
+        if error > deficit_bound + 1e-5:
+            raise AssertionError(
+                f"{file}: area error {error} exceeds chord bound "
+                f"{deficit_bound} at {step} degrees")
+    if not all(a > b * 2.5 for a, b in zip(errors, errors[1:])):
+        raise AssertionError(f"Arc area error failed to converge: {errors}")
+    if errors[-1] > 0.001:
+        raise AssertionError(f"Finest GEOS circle sampling remains inaccurate: {errors}")
+    print("GEOS independent ARC convergence PASS: "
+          + ", ".join(f"{step:g}°={error:.6f} mm²"
+                      for step, error in zip((2.0, 1.0, 0.5, 0.25), errors)))
+
 
 
 def check_geos_negative_regressions():
@@ -105,6 +144,7 @@ def check_geos_negative_regressions():
 
 def check_geos_oracle(folder):
     check_geos_negative_regressions()
+    check_arc_tessellation_convergence(folder)
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     files = {c["file"] for c in manifest}
     if not {"constrained_rectangle_with_hole.dxf",
