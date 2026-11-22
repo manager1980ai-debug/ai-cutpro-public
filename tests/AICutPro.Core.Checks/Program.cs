@@ -2990,7 +2990,7 @@ Assert(pinnedLength.Count==1 &&
        Math.Abs(pinnedLength[0].LengthMm-100)<1e-8,
        "Register exact measured length of selected LINE edge");
 var projectedLength=PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
-    lengthSource,0,1,new PreviewPoint(80,60),pinnedLength,
+    lengthSource,0,1,new PreviewPoint(80,-60),pinnedLength,
     Array.Empty<PreviewAxisRule>());
 var movedEdge=(PreviewLine)projectedLength.Rings[0].Segments[0];
 var movedLength=Math.Sqrt(Math.Pow(movedEdge.End.X-movedEdge.Start.X,2)+
@@ -2998,14 +2998,14 @@ var movedLength=Math.Sqrt(Math.Pow(movedEdge.End.X-movedEdge.Start.X,2)+
 Assert(projectedLength.IsValidForPreview && !projectedLength.CanStartMachine &&
        Math.Abs(movedLength-100)<1e-7 &&
        Math.Abs(movedEdge.End.X-80)<1e-7 &&
-       Math.Abs(movedEdge.End.Y-60)<1e-7 &&
+       Math.Abs(movedEdge.End.Y+60)<1e-7 &&
        PreviewContourTopology.Analyze(projectedLength.Rings).IsValid &&
        projectedLength.Rings[1].Segments.Count==lengthSource[1].Segments.Count,
        "Pinned R100 edge follows requested ray while preserving hole and topology");
 PreviewDxfRoundTripVerifier.Verify(projectedLength.Rings,
     PreviewDxfExporter.Export(projectedLength.Rings));
 var projectedDifferent=PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
-    lengthSource,0,1,new PreviewPoint(100,50),pinnedLength,
+    lengthSource,0,1,new PreviewPoint(100,-50),pinnedLength,
     Array.Empty<PreviewAxisRule>());
 var differentEdge=(PreviewLine)projectedDifferent.Rings[0].Segments[0];
 Assert(Math.Abs(Math.Sqrt(Math.Pow(differentEdge.End.X,2)+
