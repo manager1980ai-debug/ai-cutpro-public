@@ -176,6 +176,52 @@ public static class PreviewVertexEditor
         return new(updated, verified.NetAreaMm2, true);
     }
 
+    /// <summary>
+    /// Changes the length of one straight edge in millimetres. Its start vertex
+    /// stays fixed; its end vertex moves along the original edge direction.
+    /// Only straight, closed rings are editable. All adjacent edges, hole
+    /// ownership and topology are independently validated by MoveVertex.
+    /// </summary>
+    public static PreviewVertexEditResult SetEdgeLength(
+        IReadOnlyList<PreviewPath> rings, int ringIndex, int segmentIndex,
+        double requestedLengthMm, double toleranceMm = 0.01)
+    {
+        ArgumentNullException.ThrowIfNull(rings);
+        if (!double.IsFinite(requestedLengthMm) ||
+            requestedLengthMm <= toleranceMm ||
+            requestedLengthMm > 1_000_000)
+            throw new FormatException("Invalid target edge length.");
+        if (!double.IsFinite(toleranceMm) ||
+            toleranceMm < 0.0001 || toleranceMm > 1)
+            throw new ArgumentOutOfRangeException(nameof(toleranceMm));
+        if (rings.Count is < 1 or > 1000 ||
+            ringIndex < 0 || ringIndex >= rings.Count)
+            throw new FormatException("Invalid ring index.");
+        var ring = rings[ringIndex];
+        if (!ring.Closed || ring.Segments.Count is < 3 or > 2000 ||
+            ring.Segments.Any(segment => segment is not PreviewLine))
+            throw new FormatException("Edge dimension editing requires a closed line-only ring.");
+        if (segmentIndex < 0 || segmentIndex >= ring.Segments.Count)
+            throw new FormatException("Invalid edge index.");
+        var edge = (PreviewLine)ring.Segments[segmentIndex];
+        var dx = edge.End.X - edge.Start.X;
+        var dy = edge.End.Y - edge.Start.Y;
+        var originalLength = Math.Sqrt(dx * dx + dy * dy);
+        if (!double.IsFinite(originalLength) || originalLength <= toleranceMm)
+            throw new FormatException("Original edge is degenerate.");
+        var fraction = requestedLengthMm / originalLength;
+        var newEnd = new PreviewPoint(edge.Start.X + dx * fraction,
+                                      edge.Start.Y + dy * fraction);
+        var edited = MoveVertex(rings, ringIndex,
+            (segmentIndex + 1) % ring.Segments.Count, newEnd, toleranceMm);
+        var changedEdge = (PreviewLine)edited.Rings[ringIndex].Segments[segmentIndex];
+        var actualLength = Distance(changedEdge.Start, changedEdge.End);
+        if (Math.Abs(actualLength - requestedLengthMm) >
+            Math.Max(1e-7, requestedLengthMm * 1e-10))
+            throw new FormatException("Edited edge length does not match requested dimension.");
+        return edited;
+    }
+
     // Valid rings are not enough: changing a hole into an independent part,
     // or silently changing a material island into a void, is a drafting error.
     // Preserve the original ring ownership and parity across vertex edits.
