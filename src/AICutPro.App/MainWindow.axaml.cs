@@ -541,7 +541,7 @@ public partial class MainWindow : Window
             // original imported drawing untouched.
             var contents = PreviewDxfExporter.Export(edited.Rings, toleranceMm);
             var candidate = DxfReader.Parse(contents);
-            var reopened = PreviewDxfExporter.ValidateDocument(candidate, toleranceMm);
+            var reopened = PreviewDxfRoundTripVerifier.Verify(edited.Rings, contents, toleranceMm);
             var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
             if (!topology.IsValid || reopened.Count != edited.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2 - edited.NetAreaMm2) >
@@ -591,7 +591,7 @@ public partial class MainWindow : Window
                 originalRings, ringNumber - 1, edgeNumber - 1, lengthMm, toleranceMm);
             var serialized = PreviewDxfExporter.Export(updated.Rings, toleranceMm);
             var candidate = DxfReader.Parse(serialized);
-            var reopened = PreviewDxfExporter.ValidateDocument(candidate, toleranceMm);
+            var reopened = PreviewDxfRoundTripVerifier.Verify(updated.Rings, serialized, toleranceMm);
             var verifiedTopology = PreviewContourTopology.Analyze(reopened, toleranceMm);
             if (!verifiedTopology.IsValid || reopened.Count != updated.Rings.Count ||
                 Math.Abs(verifiedTopology.NetAreaMm2 - updated.NetAreaMm2) >
@@ -650,7 +650,7 @@ public partial class MainWindow : Window
                 before, ringNumber - 1, edgeNumber - 1, degrees, toleranceMm);
             var serialized = PreviewDxfExporter.Export(changed.Rings, toleranceMm);
             var candidate = DxfReader.Parse(serialized);
-            var reopened = PreviewDxfExporter.ValidateDocument(candidate, toleranceMm);
+            var reopened = PreviewDxfRoundTripVerifier.Verify(changed.Rings, serialized, toleranceMm);
             var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
             if (!topology.IsValid || reopened.Count != changed.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2 - changed.NetAreaMm2) >
