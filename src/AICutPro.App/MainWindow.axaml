@@ -98,6 +98,14 @@
           <TextBlock Text="Геометрическое ограничение прямого ребра" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
           <Button Content="Выровнять ребро горизонтально" Click="ConstrainEdgeHorizontalClicked"/>
           <Button Content="Выровнять ребро вертикально" Click="ConstrainEdgeVerticalClicked"/>
+          <TextBlock Text="Сохраняемая ориентация выбранного ребра (до 16 ограничений на эскиз)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <ComboBox x:Name="AxisConstraintDirectionBox" SelectedIndex="0">
+            <ComboBoxItem Content="Горизонтально"/>
+            <ComboBoxItem Content="Вертикально"/>
+          </ComboBox>
+          <Button Content="Закрепить ограничение направления" Click="PinAxisConstraintClicked"/>
+          <Button Content="Снять выбранное ограничение" Click="UnpinAxisConstraintClicked"/>
+          <TextBlock Text="Сначала выровняйте ребро. Закрепление хранится с Undo/Redo; несовместимое изменение отклоняется, а не пересчитывается молча. Открытие нового DXF сбрасывает ограничения." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Однократная фиксация направления: начальная вершина и длина ребра сохраняются. Номер ребра выше; только LINE-контуры. Это пока не постоянная параметрическая зависимость." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Радиус выбранной дуги ARC, мм (концы дуги закреплены)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
           <TextBox x:Name="EditArcRadiusBox" Text="12" Watermark="Новый радиус, мм"/>
