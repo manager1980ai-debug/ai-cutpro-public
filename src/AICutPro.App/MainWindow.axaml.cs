@@ -729,6 +729,43 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AddCircleHoleClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text, out var toleranceMm))
+                throw new FormatException("Некорректный допуск DXF.");
+            static bool Coordinate(string? raw, out double value) =>
+                (double.TryParse(raw, NumberStyles.Float, CultureInfo.CurrentCulture, out value) ||
+                 double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) &&
+                double.IsFinite(value);
+            if (!Coordinate(HoleCenterXBox.Text, out var cx) ||
+                !Coordinate(HoleCenterYBox.Text, out var cy) ||
+                !Coordinate(HoleDiameterBox.Text, out var diameter))
+                throw new FormatException("Неверные координаты или диаметр отверстия.");
+            var updated = PreviewCircleHoleEditor.AddHole(
+                _dxfPreview, new PreviewPoint(cx,cy), diameter, toleranceMm);
+            // The verified result remains a document with an explicit CIRCLE,
+            // allowing subsequent numeric edits and undo/redo.
+            CommitDxfPreview(updated);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text = "DXF: добавление круглого отверстия, только предпросмотр";
+            StatusText.Text = $"Новое отверстие: центр ({cx:0.###}; {cy:0.###}) мм, " +
+                $"Ø{diameter:0.###} мм. Отмена доступна. " +
+                "CAM и управление станком запрещены.";
+            RenderSheet();
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Добавление отверстия отклонено: " + ex.Message;
+        }
+    }
+
     private void EditCircleHoleClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
