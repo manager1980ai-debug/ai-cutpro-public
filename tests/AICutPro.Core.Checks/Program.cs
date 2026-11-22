@@ -116,6 +116,28 @@ catch (FormatException) { conflictingUnitsRejected = true; }
 Assert(conflictingUnitsRejected,
        "Conflicting repeated $INSUNITS must reject DXF instead of guessing scale");
 
+bool duplicateUnitsValueRejected = false;
+try
+{
+    DxfReader.Parse(string.Join("\n", new[]
+    {
+        "0","SECTION","2","HEADER","9","$INSUNITS","70","4",
+        "70","1","0","ENDSEC","0","SECTION",
+        "2","ENTITIES","0","ENDSEC","0","EOF"
+    }));
+}
+catch (FormatException) { duplicateUnitsValueRejected = true; }
+Assert(duplicateUnitsValueRejected,
+       "Two unit values within one DXF header variable must fail closed");
+var repeatedVertexCodes = DxfReader.Parse(SafeEntityDxf(
+    "0","LWPOLYLINE","90","3","70","1",
+    "10","0","20","0","10","10","20","0","10","0","20","10"));
+Assert(repeatedVertexCodes.Shapes.Count == 1 &&
+       repeatedVertexCodes.Shapes[0] is DxfPolyline { Closed: true } &&
+       repeatedVertexCodes.Warnings.Count == 0,
+       "Ordinary repeated DXF polyline vertex coordinate groups remain supported");
+
+
 var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
 Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
 var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
