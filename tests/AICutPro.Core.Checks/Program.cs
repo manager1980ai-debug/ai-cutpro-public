@@ -1403,8 +1403,42 @@ Assert(RejectSynchronized3D(withAddedHole,0) &&
 var twoPartsDoc=Document(rectangle,
     Closed("CUT",new Point2(300,0),new Point2(320,0),
           new Point2(320,20),new Point2(300,20)));
-Assert(RejectSynchronized3D(twoPartsDoc,5) &&
-       RejectSynchronized3D(Document(rectangle,innerHole),5),
-       "3D refuses multiple parts and unsupported noncircular through-holes");
+Assert(RejectSynchronized3D(twoPartsDoc,5),
+       "3D still refuses multiple independent parts");
+// Rectangle + rectangular hole + true circle: all three profiles must be
+// represented by CSG, with a matching analytic 2D area and 3D volume.
+var mixedHoles3D = DxfSynchronized3DExporter.Export(
+    Document(rectangle,innerHole,circleHole),6);
+Assert(mixedHoles3D.HoleCount == 2 &&
+       mixedHoles3D.OpenScad.Contains("polygon(points = [[20, 20]") &&
+       mixedHoles3D.OpenScad.Contains("cylinder(h = ") &&
+       mixedHoles3D.OpenScad.Contains("r = 10") &&
+       mixedHoles3D.OpenScad.Split("linear_extrude(height = ").Length - 1 == 2 &&
+       Math.Abs(mixedHoles3D.NetAreaMm2 -
+           (20000-400-Math.PI*100)) < 1e-6 &&
+       Math.Abs(mixedHoles3D.VolumeMm3 -
+           (20000-400-Math.PI*100)*6)<1e-5,
+       "3D extrudes exact polygon hole and circular hole from current DXF");
+var polygonOnly3D = DxfSynchronized3DExporter.Export(
+    Document(rectangle,innerHole),3);
+Assert(polygonOnly3D.HoleCount == 1 &&
+       !polygonOnly3D.OpenScad.Contains("cylinder(") &&
+       polygonOnly3D.OpenScad.Contains("polygon(points = [[20, 20]"),
+       "3D handles a polygonal hole without a circular cutter");
+var editedPolygonHole = PreviewVertexEditor.MoveVertex(
+    PreviewDxfExporter.ValidateDocument(Document(rectangle,innerHole)),
+    1,1,new PreviewPoint(45,20));
+var editedPolygonDoc = DxfReader.Parse(
+    PreviewDxfExporter.Export(editedPolygonHole.Rings));
+var editedPolygon3D = DxfSynchronized3DExporter.Export(editedPolygonDoc,4);
+Assert(editedPolygon3D.OpenScad.Contains("[45, 20]") &&
+       Math.Abs(editedPolygon3D.NetAreaMm2-editedPolygonHole.NetAreaMm2)<1e-6,
+       "3D polygon hole follows vertex editing and DXF export/reimport");
+// A material island surrounded by a void needs a more general CSG hierarchy.
+var islandDoc = Document(rectangle,innerHole,
+    Closed("ISLAND",new Point2(25,25),new Point2(30,25),
+           new Point2(30,30),new Point2(25,30)));
+Assert(RejectSynchronized3D(islandDoc,4),
+       "3D refuses nested material island instead of silently losing it");
 
 Console.WriteLine("AI CutPro core checks passed.");
