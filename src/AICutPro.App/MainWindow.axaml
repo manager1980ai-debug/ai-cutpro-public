@@ -78,7 +78,7 @@
           <TextBlock Text="Точное скругление угла дугой ARC (радиус, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
           <TextBox x:Name="FilletRadiusBox" Text="5" Watermark="Радиус скругления, мм"/>
           <Button Content="Скруглить выбранный угол (предпросмотр)" Click="FilletDxfVertexClicked"/>
-          <TextBlock Text="Номера контура и вершины выше; выпуклые и вогнутые углы замкнутых LINE-контуров. Проверяются вложенность, самопересечения и DXF. Без CAM." Foreground="#9CB3C9" TextWrapping="Wrap"/>
+          <TextBlock Text="Номера контура и вершины выше; выпуклые и вогнутые LINE/LINE углы, в том числе в смешанном контуре LINE/ARC. Соседние ARC не редактируются. Проверяются геометрия и DXF; без CAM." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Использует номера контура и вершины выше. Только замкнутые LINE-контуры; проверяются отверстия и DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Точный размер ребра, мм (номер вершины = начало ребра)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditEdgeLengthBox" Text="10" Watermark="Новая длина ребра, мм"/>
