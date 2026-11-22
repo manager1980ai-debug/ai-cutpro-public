@@ -517,6 +517,13 @@ public partial class MainWindow : Window
                     Math.Max(1e-6,edited.NetAreaMm2*1e-9))
                 throw new FormatException("Преобразование не прошло повторную проверку DXF.");
             CommitDxfPreview(imported);
+            // Export uses these same controls for optional output-only transforms.
+            // Clear parameters already applied to the active drawing so saving
+            // cannot accidentally repeat the move or rotation.
+            if (operation == "перенос")
+                ExportMoveXBox.Text = ExportMoveYBox.Text = "0";
+            else if (operation == "поворот")
+                ExportRotationBox.Text = "0";
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
