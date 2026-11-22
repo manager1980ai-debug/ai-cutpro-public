@@ -78,6 +78,44 @@ Assert(preview.Warnings.Count == 0, "Valid DXF has no warnings");
 Assert(preview.Shapes[0] is DxfLine { Layer: "CUT" }, "Line layer");
 Assert(preview.Shapes[1] is DxfCircle { Radius: 12 }, "Circle radius");
 Assert(preview.Shapes[2] is DxfPolyline { Closed: true }, "Closed polyline");
+// B1: ambiguity in scalar DXF coordinates, radius or unit declarations
+// must never silently select one value and produce editable geometry.
+static string SafeEntityDxf(params string[] entityPairs) =>
+    string.Join("\n", new[]
+    {
+        "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+        "0","SECTION","2","ENTITIES"
+    }.Concat(entityPairs).Concat(new[] { "0","ENDSEC","0","EOF" }));
+var ambiguousLine = DxfReader.Parse(SafeEntityDxf(
+    "0","LINE","10","0","10","100","20","0","11","10","21","0"));
+Assert(ambiguousLine.Shapes.Count == 0 &&
+       ambiguousLine.Warnings.Any(w => w.Contains("Duplicate DXF scalar group 10")),
+       "Duplicate DXF X coordinate must skip the entire ambiguous LINE");
+var ambiguousCircle = DxfReader.Parse(SafeEntityDxf(
+    "0","CIRCLE","10","5","20","5","40","10","40","20"));
+Assert(ambiguousCircle.Shapes.Count == 0 &&
+       ambiguousCircle.Warnings.Any(w => w.Contains("Duplicate DXF scalar group 40")),
+       "Duplicate DXF radius must skip the entire ambiguous CIRCLE");
+var ambiguousPolyline = DxfReader.Parse(SafeEntityDxf(
+    "0","LWPOLYLINE","90","3","90","4","70","1",
+    "10","0","20","0","10","10","20","0","10","0","20","10"));
+Assert(ambiguousPolyline.Shapes.Count == 0 &&
+       ambiguousPolyline.Warnings.Any(w => w.Contains("Duplicate DXF integer group 90")),
+       "Duplicate DXF vertex count must not create an editable polyline");
+bool conflictingUnitsRejected = false;
+try
+{
+    DxfReader.Parse(string.Join("\n", new[]
+    {
+        "0","SECTION","2","HEADER","9","$INSUNITS","70","4",
+        "9","$INSUNITS","70","1","0","ENDSEC","0","SECTION",
+        "2","ENTITIES","0","ENDSEC","0","EOF"
+    }));
+}
+catch (FormatException) { conflictingUnitsRejected = true; }
+Assert(conflictingUnitsRejected,
+       "Conflicting repeated $INSUNITS must reject DXF instead of guessing scale");
+
 var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
 Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
 var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
