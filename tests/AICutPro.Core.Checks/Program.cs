@@ -2591,4 +2591,41 @@ Assert(notchPaths[0].Segments.Count==8 &&
            notchBefore.NetAreaMm2)<1e-6,
        "Concave edit never mutates original DXF source");
 
+// B2: a second fillet can now be applied to an already curved LINE/ARC
+// exterior provided its selected corner joins two LINE segments. The
+// previous exact ARC must survive unchanged and the circular hole stay put.
+var successiveFillet=PreviewCornerFilletEditor.FilletVertex(
+    filleted.Rings,0,1,5);
+var successiveTopo=PreviewContourTopology.Analyze(successiveFillet.Rings);
+var successiveArcs=successiveFillet.Rings[0].Segments.OfType<PreviewArc>().ToArray();
+Assert(successiveFillet.IsValidForPreview && !successiveFillet.CanStartMachine &&
+       successiveTopo.IsValid &&
+       successiveFillet.Rings[0].Segments.Count==6 &&
+       successiveArcs.Length==2 &&
+       successiveArcs.Any(a=>Math.Abs(a.Center.X-10)<1e-7 &&
+                             Math.Abs(a.Center.Y-10)<1e-7 &&
+                             Math.Abs(a.RadiusMm-10)<1e-7) &&
+       successiveArcs.Any(a=>Math.Abs(a.Center.X-95)<1e-7 &&
+                             Math.Abs(a.Center.Y-5)<1e-7 &&
+                             Math.Abs(a.RadiusMm-5)<1e-7) &&
+       Math.Abs(successiveTopo.NetAreaMm2-
+           (filletAfter.NetAreaMm2-25*(1-Math.PI/4)))<1e-5 &&
+       successiveFillet.Rings[1].Segments.Count==filleted.Rings[1].Segments.Count,
+       "Fillet of a LINE corner in mixed LINE/ARC ring preserves existing arc and hole");
+var successiveDxf=PreviewDxfExporter.Export(successiveFillet.Rings);
+var successiveReopened=PreviewDxfRoundTripVerifier.Verify(
+    successiveFillet.Rings,successiveDxf);
+Assert(PreviewContourTopology.Analyze(successiveReopened).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(successiveReopened).NetAreaMm2-
+           successiveTopo.NetAreaMm2)<1e-5,
+       "Second fillet survives DXF export and import with two exact exterior arcs");
+bool adjacentArcRefused=false;
+try { PreviewCornerFilletEditor.FilletVertex(filleted.Rings,0,0,5); }
+catch(FormatException) { adjacentArcRefused=true; }
+Assert(adjacentArcRefused,
+       "Fillet at an ARC/LINE junction is safely refused, not approximated");
+Assert(filleted.Rings[0].Segments.Count==5 &&
+       filleted.Rings[0].Segments.OfType<PreviewArc>().Count()==1,
+       "Second fillet cannot mutate original DXF history snapshot");
+
 Console.WriteLine("AI CutPro core checks passed.");
