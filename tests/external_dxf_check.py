@@ -10,6 +10,42 @@ import sys
 
 import ezdxf
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class AuditTolerances:
+    """Validated DXF test policy, in millimetres; not a CAM tolerance."""
+    join: float = 1e-5
+    intersection: float = 1e-7
+    containment: float = 1e-5
+
+    def __post_init__(self):
+        for key in ("join", "intersection", "containment"):
+            value = getattr(self, key)
+            if not math.isfinite(value) or not 1e-12 <= value <= 0.01:
+                raise ValueError(f"{key} must be finite and in [1e-12, 0.01] mm")
+        if self.intersection > self.join:
+            raise ValueError("Intersection tolerance exceeds join tolerance")
+        if self.containment < self.intersection:
+            raise ValueError("Containment tolerance below intersection tolerance")
+
+
+def check_tolerance_policy_regressions():
+    for invalid in (
+        {"join": 0}, {"join": -1}, {"join": float("nan")},
+        {"intersection": float("inf")}, {"containment": .1},
+        {"join": 1e-5, "intersection": 1e-4},
+        {"intersection": 1e-6, "containment": 1e-7},
+    ):
+        try:
+            AuditTolerances(**invalid)
+        except ValueError:
+            continue
+        raise AssertionError(f"Unsafe tolerance configuration accepted: {invalid}")
+
+
+
 
 def _endpoints(entity):
     """Read actual geometry from ezdxf, independently of AI CutPro's parser."""
@@ -538,7 +574,8 @@ def run_numerical_stress_regressions():
             raise AssertionError(f"Interior LINE/ARC tangent accepted at R{radius}")
 
 
-def check_sample(root: pathlib.Path, case: dict) -> None:
+def check_sample(root: pathlib.Path, case: dict,
+                 policy: AuditTolerances = AuditTolerances()) -> None:
     path = root / case["file"]
     doc = ezdxf.readfile(path)
     auditor = doc.audit()
@@ -558,11 +595,12 @@ def check_sample(root: pathlib.Path, case: dict) -> None:
             f"found {types.count('LINE')}/{types.count('ARC')}"
         )
 
-    vertex_count, edge_count = check_closed_contour_graph(entities)
-    check_line_intersections(entities)
-    check_curved_intersections(entities)
-    ring_count, hole_count = check_ring_nesting(entities,
-        case.get('expected_rings'),case.get('expected_holes'))
+    vertex_count, edge_count = check_closed_contour_graph(entities, policy.join)
+    check_line_intersections(entities, policy.intersection)
+    check_curved_intersections(entities, policy.intersection)
+    ring_count, hole_count = check_ring_nesting(
+        entities, case.get('expected_rings'), case.get('expected_holes'),
+        policy.containment)
     radii = []
     perimeter = 0.0
     for entity in entities:
@@ -600,11 +638,20 @@ def check_sample(root: pathlib.Path, case: dict) -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Independent DXF verifier; tolerances in mm")
+    parser.add_argument("folder", type=pathlib.Path)
+    parser.add_argument("--join-mm", type=float, default=1e-5)
+    parser.add_argument("--intersection-mm", type=float, default=1e-7)
+    parser.add_argument("--containment-mm", type=float, default=1e-5)
+    args = parser.parse_args()
+    policy = AuditTolerances(args.join_mm, args.intersection_mm, args.containment_mm)
+    check_tolerance_policy_regressions()
     run_negative_graph_regressions()
     run_numerical_stress_regressions()
-    folder = pathlib.Path(sys.argv[1])
-    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((args.folder / "manifest.json").read_text(encoding="utf-8"))
     if len(manifest) < 4:
         raise AssertionError("Expected four diverse DXF fixtures")
+    print(f"Independent DXF tolerances in mm: {policy}")
     for sample in manifest:
-        check_sample(folder, sample)
+        check_sample(args.folder, sample, policy)
