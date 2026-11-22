@@ -2063,4 +2063,84 @@ foreach (var shift in new[] { 0d, 300d, 1200d })
 Assert(verifiedMultiPartHoles==9,
        "All translated and scaled independent multi-part hole scenarios ran");
 
+// B2: three complete rigid-edit primitives for verified CAD contours:
+// translate, rotate, and vertical reflection. Preserve exact circular arcs,
+// two-dimensional nesting and analytical area throughout DXF round-trips.
+var rigidSource = Document(
+    Closed("RIGID_OUTER",new Point2(0,0),new Point2(300,0),
+           new Point2(300,200),new Point2(0,200)),
+    new DxfCircle("RIGID_HOLE",new Point2(100,100),30));
+var rigidPaths = PreviewDxfExporter.ValidateDocument(rigidSource);
+var rigidArea = 60000d - Math.PI * 900;
+var rigidInitial = PreviewContourTopology.Analyze(rigidPaths);
+Assert(rigidInitial.IsValid && rigidPaths.Count==2 &&
+       Math.Abs(rigidInitial.NetAreaMm2-rigidArea)<1e-6,
+       "Rigid editor fixture is verified nested LINE/ARC geometry");
+
+var rigidTranslated = PreviewRigidTransformEditor.Translate(rigidPaths,70,80);
+var translatedTopo = PreviewContourTopology.Analyze(rigidTranslated.Rings);
+Assert(rigidTranslated.IsValidForPreview && !rigidTranslated.CanStartMachine &&
+       translatedTopo.IsValid && translatedTopo.Rings.Count==2 &&
+       Math.Abs(rigidTranslated.NetAreaMm2-rigidArea)<1e-6 &&
+       rigidTranslated.Rings.SelectMany(p=>p.Segments)
+           .OfType<PreviewArc>().Any(a=>Math.Abs(a.Center.X-170)<1e-7 &&
+                                          Math.Abs(a.Center.Y-180)<1e-7),
+       "Translate moves hole and material as one rigid CAD assembly");
+PreviewDxfRoundTripVerifier.Verify(rigidTranslated.Rings,
+    PreviewDxfExporter.Export(rigidTranslated.Rings));
+
+var rigidRotated = PreviewRigidTransformEditor.Rotate(rigidPaths,new(0,0),90);
+var rotatedTopo = PreviewContourTopology.Analyze(rigidRotated.Rings);
+Assert(rigidRotated.IsValidForPreview && rotatedTopo.IsValid &&
+       Math.Abs(rotatedTopo.NetAreaMm2-rigidArea)<1e-6 &&
+       rigidRotated.Rings.SelectMany(p=>p.Segments)
+           .OfType<PreviewArc>().Any(a=>Math.Abs(a.Center.X+100)<1e-7 &&
+                                          Math.Abs(a.Center.Y-100)<1e-7),
+       "Rotate turns material and circular hole around a fixed pivot");
+PreviewDxfRoundTripVerifier.Verify(rigidRotated.Rings,
+    PreviewDxfExporter.Export(rigidRotated.Rings));
+
+var rigidMirrored = PreviewRigidTransformEditor.MirrorVertical(rigidPaths,150);
+var mirrorTopo = PreviewContourTopology.Analyze(rigidMirrored.Rings);
+Assert(rigidMirrored.IsValidForPreview && mirrorTopo.IsValid &&
+       Math.Abs(mirrorTopo.NetAreaMm2-rigidArea)<1e-6 &&
+       rigidMirrored.Rings.SelectMany(p=>p.Segments)
+           .OfType<PreviewArc>().Any(a=>Math.Abs(a.Center.X-200)<1e-7 &&
+                                          Math.Abs(a.Center.Y-100)<1e-7 &&
+                                          a.SweepDegrees<0),
+       "Reflect preserves hole ownership and reverses ARC handedness");
+PreviewDxfRoundTripVerifier.Verify(rigidMirrored.Rings,
+    PreviewDxfExporter.Export(rigidMirrored.Rings));
+
+static bool RejectRigidEdit(Func<PreviewVertexEditResult> edit)
+{
+    try { edit(); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectRigidEdit(()=>PreviewRigidTransformEditor.Translate(
+           rigidPaths,double.NaN,0)) &&
+       RejectRigidEdit(()=>PreviewRigidTransformEditor.Translate(
+           rigidPaths,1_100_000,0)) &&
+       RejectRigidEdit(()=>PreviewRigidTransformEditor.Rotate(
+           rigidPaths,new(0,0),double.PositiveInfinity)) &&
+       RejectRigidEdit(()=>PreviewRigidTransformEditor.MirrorVertical(
+           rigidPaths,double.NaN)),
+       "Invalid rigid transform input is rejected before geometry can be exported");
+// Compose all three operations, then undo them with inverse rigid transforms.
+var rigidComposite = PreviewRigidTransformEditor.MirrorVertical(
+    PreviewRigidTransformEditor.Rotate(
+        PreviewRigidTransformEditor.Translate(rigidPaths,40,25).Rings,
+        new(0,0),90).Rings,100);
+var inverseMirror = PreviewRigidTransformEditor.MirrorVertical(
+    rigidComposite.Rings,100);
+var inverseRotate = PreviewRigidTransformEditor.Rotate(
+    inverseMirror.Rings,new(0,0),-90);
+var inverseTranslate = PreviewRigidTransformEditor.Translate(
+    inverseRotate.Rings,-40,-25);
+var restoredRigidTopology=PreviewContourTopology.Analyze(inverseTranslate.Rings);
+Assert(restoredRigidTopology.IsValid &&
+       Math.Abs(restoredRigidTopology.NetAreaMm2-rigidArea)<1e-6 &&
+       inverseTranslate.Rings.Count==rigidPaths.Count,
+       "Combined translate/rotate/mirror and their inverse preserve verified topology");
+
 Console.WriteLine("AI CutPro core checks passed.");
