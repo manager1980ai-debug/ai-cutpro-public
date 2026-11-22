@@ -564,6 +564,65 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SetDxfEdgeLengthClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте 2D-эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text, out var toleranceMm))
+                throw new FormatException("Некорректный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var edgeNumber) ||
+                ringNumber < 1 || edgeNumber < 1)
+                throw new FormatException("Номер контура и ребра должен быть положительным.");
+            if (!(double.TryParse(EditEdgeLengthBox.Text, NumberStyles.Float,
+                     CultureInfo.CurrentCulture, out var lengthMm) ||
+                  double.TryParse(EditEdgeLengthBox.Text, NumberStyles.Float,
+                     CultureInfo.InvariantCulture, out lengthMm)) ||
+                !double.IsFinite(lengthMm))
+                throw new FormatException("Неверный размер ребра.");
+
+            var originalRings = PreviewDxfExporter.ValidateDocument(_dxfPreview, toleranceMm);
+            var updated = PreviewVertexEditor.SetEdgeLength(
+                originalRings, ringNumber - 1, edgeNumber - 1, lengthMm, toleranceMm);
+            var serialized = PreviewDxfExporter.Export(updated.Rings, toleranceMm);
+            var candidate = DxfReader.Parse(serialized);
+            var reopened = PreviewDxfExporter.ValidateDocument(candidate, toleranceMm);
+            var verifiedTopology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            if (!verifiedTopology.IsValid || reopened.Count != updated.Rings.Count ||
+                Math.Abs(verifiedTopology.NetAreaMm2 - updated.NetAreaMm2) >
+                    Math.Max(1e-6, Math.Abs(updated.NetAreaMm2) * 1e-9))
+                throw new FormatException("Размерный DXF не прошёл повторную проверку.");
+            if (reopened[ringNumber - 1].Segments[edgeNumber - 1] is not PreviewLine edge)
+                throw new FormatException("Редактируемое ребро больше не прямолинейное.");
+            var dx = edge.End.X - edge.Start.X;
+            var dy = edge.End.Y - edge.Start.Y;
+            var actualLength = Math.Sqrt(dx * dx + dy * dy);
+            if (Math.Abs(actualLength - lengthMm) >
+                Math.Max(1e-6, Math.Abs(lengthMm) * 1e-9))
+                throw new FormatException("Повторно открытый DXF изменил заданный размер.");
+
+            _dxfPreview = candidate;
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text = "DXF: размерное редактирование, только предпросмотр";
+            StatusText.Text = $"Контур №{ringNumber}, ребро №{edgeNumber}: " +
+                $"длина {actualLength:0.###} мм, чистая площадь " +
+                $"{verifiedTopology.NetAreaMm2:0.###} мм². " +
+                "Геометрия проверена; CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Изменение размера отклонено: " + ex.Message;
+        }
+    }
+
     private async void ExportEditedDxfClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
