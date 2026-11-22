@@ -2829,4 +2829,74 @@ try { PreviewAxisConstraintEditor.AlignEdge(verticalRings,0,99,false); }
 catch(FormatException){axisIndexRejected=true;}
 Assert(axisIndexRejected,"Axis constraint refuses nonexistent edge");
 
+// Stage 2 B2: persistent axis rules follow the DXF Undo/Redo snapshot.
+var pinnedSource=horizontalAligned.Rings;
+var pinHorizontal=new PreviewAxisRule(0,0,true);
+var pinnedRules=PreviewPersistentAxisConstraints.Add(
+    pinnedSource,Array.Empty<PreviewAxisRule>(),pinHorizontal);
+Assert(pinnedRules.Count==1 && pinnedRules[0]==pinHorizontal,
+       "Already aligned edge can be pinned with an indexed axis relation");
+var compatiblePinnedEdit=PreviewVertexEditor.MoveVertex(
+    pinnedSource,0,1,new PreviewPoint(110,0));
+PreviewPersistentAxisConstraints.RequireCompatibleEdit(
+    pinnedSource,compatiblePinnedEdit.Rings,pinnedRules);
+Assert(PreviewContourTopology.Analyze(compatiblePinnedEdit.Rings).IsValid,
+       "Pinned horizontal edge accepts compatible vertex edits");
+bool incompatiblePinnedRejected=false;
+try
+{
+    var incompatible=PreviewVertexEditor.MoveVertex(
+        pinnedSource,0,1,new PreviewPoint(110,8));
+    PreviewPersistentAxisConstraints.RequireCompatibleEdit(
+        pinnedSource,incompatible.Rings,pinnedRules);
+}
+catch(FormatException){incompatiblePinnedRejected=true;}
+Assert(incompatiblePinnedRejected,
+       "Pinned horizontal edge rejects an edit that changes Y coordinate");
+bool opposingPinRejected=false;
+try
+{
+    PreviewPersistentAxisConstraints.Add(
+        pinnedSource,pinnedRules,new PreviewAxisRule(0,0,false));
+}
+catch(FormatException){opposingPinRejected=true;}
+Assert(opposingPinRejected,"Contradictory horizontal and vertical rules are rejected");
+var pinnedInitialDxf=DxfReader.Parse(PreviewDxfExporter.Export(pinnedSource));
+var persistentHistory=new DxfPreviewHistory(pinnedInitialDxf);
+Assert(persistentHistory.CurrentAxisRules.Count==0,
+       "Fresh DXF session starts without inherited axis rules");
+persistentHistory.Push(pinnedInitialDxf,pinnedRules);
+var pinnedChangedDxf=DxfReader.Parse(
+    PreviewDxfExporter.Export(compatiblePinnedEdit.Rings));
+persistentHistory.Push(pinnedChangedDxf,pinnedRules);
+Assert(persistentHistory.CurrentAxisRules.SequenceEqual(pinnedRules) &&
+       persistentHistory.UndoCount==2,
+       "Compatible DXF edit and axis rules share same history state");
+persistentHistory.Undo();
+Assert(persistentHistory.CurrentAxisRules.SequenceEqual(pinnedRules),
+       "Undo of geometry retains rules from prior pinned state");
+persistentHistory.Undo();
+Assert(persistentHistory.CurrentAxisRules.Count==0,
+       "Undo of rule registration restores unpinned state");
+persistentHistory.Redo();
+Assert(persistentHistory.CurrentAxisRules.SequenceEqual(pinnedRules),
+       "Redo restores rule registration atomically");
+var unpinnedRules=PreviewPersistentAxisConstraints.Remove(
+    persistentHistory.CurrentAxisRules,pinHorizontal);
+persistentHistory.Push(persistentHistory.Current,unpinnedRules);
+Assert(persistentHistory.CurrentAxisRules.Count==0 &&
+       !persistentHistory.CanRedo,
+       "Rule removal creates a new history branch and discards stale redo");
+var newSession=new DxfPreviewHistory(pinnedInitialDxf);
+Assert(newSession.CurrentAxisRules.Count==0,
+       "Opening another DXF does not leak old indexed constraints");
+bool invalidPinRejected=false;
+try
+{
+    PreviewPersistentAxisConstraints.Add(
+        pinnedSource,pinnedRules,new PreviewAxisRule(1,0,true));
+}
+catch(FormatException){invalidPinRejected=true;}
+Assert(invalidPinRejected,"Persistent rule refuses ARC-only hole");
+
 Console.WriteLine("AI CutPro core checks passed.");
