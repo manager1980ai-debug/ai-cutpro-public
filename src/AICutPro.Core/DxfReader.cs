@@ -155,10 +155,10 @@ public static class DxfReader
                 {
                     var flags=Integer(fields,70);
                     if ((flags & ~1)!=0 ||
-                        fields.Any(x=>x.Code is 38 or 39 or 30 &&
+                        fields.Any(x=>x.Code is 38 or 39 or 30 or 40 or 41 &&
                                       Math.Abs(Number(x))>1e-12) ||
                         fields.Any(x=>x.Code is 210 or 220 or 230))
-                        throw new FormatException("Unsupported legacy POLYLINE flags or 3D geometry.");
+                        throw new FormatException("Unsupported legacy POLYLINE flags, width, or 3D geometry.");
                     var legacyLayer=fields.FirstOrDefault(x=>x.Code==8).Value ?? "0";
                     var vertices=new List<Point2>();
                     var bulges=new List<double>();
@@ -178,14 +178,19 @@ public static class DxfReader
                         var vertexFields=new List<Pair>();
                         while(i<pairs.Count && pairs[i].Code!=0)
                             vertexFields.Add(pairs[i++]);
-                        if (vertexFields.Any(x=>x.Code is 30 or 39 &&
+                        if (vertexFields.Any(x=>x.Code is 30 or 39 or 40 or 41 &&
                                                 Math.Abs(Number(x))>1e-12) ||
-                            (Integer(vertexFields,70)&~0)!=0)
-                            throw new FormatException("Unsupported legacy 3D/fitted VERTEX.");
+                            vertexFields.Any(x=>x.Code is 210 or 220 or 230) ||
+                            Integer(vertexFields,70)!=0)
+                            throw new FormatException("Unsupported legacy 3D, width, or fitted VERTEX.");
                         vertices.Add(new Point2(
                             Required(vertexFields,10),Required(vertexFields,20)));
-                        bulges.Add(vertexFields.Where(x=>x.Code==42)
-                            .Select(Number).DefaultIfEmpty(0).First());
+                        // A legacy vertex has one scalar bulge: never silently
+                        // choose the first of two conflicting curvature values.
+                        var vertexBulges=vertexFields.Where(x=>x.Code==42).ToArray();
+                        if(vertexBulges.Length>1)
+                            throw new FormatException("Duplicate legacy VERTEX bulge.");
+                        bulges.Add(vertexBulges.Length==0?0:Number(vertexBulges[0]));
                         if(vertices.Count>10000)
                             throw new FormatException("Too many legacy POLYLINE vertices.");
                     }
