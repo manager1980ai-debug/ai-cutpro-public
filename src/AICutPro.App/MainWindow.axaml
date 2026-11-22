@@ -82,6 +82,10 @@
           <TextBox x:Name="LineArcFilletRadiusBox" Text="5" Watermark="Радиус переходной дуги, мм"/>
           <Button Content="Построить касательное LINE/ARC сопряжение" Click="FilletLineArcClicked"/>
           <Button Content="Построить касательное ARC/LINE сопряжение" Click="FilletArcLineClicked"/>
+          <TextBlock Text="Касательное сопряжение двух соседних дуг ARC" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <TextBox x:Name="ArcArcFilletRadiusBox" Text="5" Watermark="Радиус соединительной ARC, мм"/>
+          <Button Content="Построить касательное ARC/ARC сопряжение" Click="FilletArcArcClicked"/>
+          <TextBlock Text="Номер сегмента выше указывает на вторую ARC после первой ARC. При отсутствии касательного решения DXF останется без изменений." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Номер сегмента выше должен указывать на исходную ARC после LINE. Работает только при геометрически допустимом касательном решении; иначе отказ без изменения DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Номера контура и вершины выше; выпуклые и вогнутые LINE/LINE углы, в том числе в смешанном контуре LINE/ARC. Соседние ARC не редактируются. Проверяются геометрия и DXF; без CAM." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Использует номера контура и вершины выше. Только замкнутые LINE-контуры; проверяются отверстия и DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
