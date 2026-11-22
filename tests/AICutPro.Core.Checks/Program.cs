@@ -2978,4 +2978,87 @@ Assert(Math.Abs(((PreviewLine)constrainedRectangle[0].Segments[0]).End.X-100)<1e
        Math.Abs(((PreviewLine)constrainedRectangle[0].Segments[0]).End.Y)<1e-7,
        "Multi-vertex solver leaves original snapshot unchanged");
 
+// Stage 2 B2: persistent edge length, one-vertex circle projection and
+// atomic Undo/Redo state; existing axis rules still guard incompatible edits.
+var lengthSource=PreviewDxfExporter.ValidateDocument(Document(
+    Closed("LENGTH_PLATE",new Point2(0,0),new Point2(100,0),
+           new Point2(100,100),new Point2(0,100)),
+    new DxfCircle("LENGTH_HOLE",new Point2(50,50),10)));
+var pinnedLength=PreviewPersistentLengthConstraints.Add(
+    lengthSource,Array.Empty<PreviewLengthRule>(),0,0);
+Assert(pinnedLength.Count==1 &&
+       Math.Abs(pinnedLength[0].LengthMm-100)<1e-8,
+       "Register exact measured length of selected LINE edge");
+var projectedLength=PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
+    lengthSource,0,1,new PreviewPoint(80,60),pinnedLength,
+    Array.Empty<PreviewAxisRule>());
+var movedEdge=(PreviewLine)projectedLength.Rings[0].Segments[0];
+var movedLength=Math.Sqrt(Math.Pow(movedEdge.End.X-movedEdge.Start.X,2)+
+                          Math.Pow(movedEdge.End.Y-movedEdge.Start.Y,2));
+Assert(projectedLength.IsValidForPreview && !projectedLength.CanStartMachine &&
+       Math.Abs(movedLength-100)<1e-7 &&
+       Math.Abs(movedEdge.End.X-80)<1e-7 &&
+       Math.Abs(movedEdge.End.Y-60)<1e-7 &&
+       PreviewContourTopology.Analyze(projectedLength.Rings).IsValid &&
+       projectedLength.Rings[1].Segments.Count==lengthSource[1].Segments.Count,
+       "Pinned R100 edge follows requested ray while preserving hole and topology");
+PreviewDxfRoundTripVerifier.Verify(projectedLength.Rings,
+    PreviewDxfExporter.Export(projectedLength.Rings));
+var projectedDifferent=PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
+    lengthSource,0,1,new PreviewPoint(100,50),pinnedLength,
+    Array.Empty<PreviewAxisRule>());
+var differentEdge=(PreviewLine)projectedDifferent.Rings[0].Segments[0];
+Assert(Math.Abs(Math.Sqrt(Math.Pow(differentEdge.End.X,2)+
+                            Math.Pow(differentEdge.End.Y,2))-100)<1e-7,
+       "Nontrivial requested vertex position is projected onto exact length circle");
+var lengthAxis=PreviewPersistentAxisConstraints.Add(
+    lengthSource,Array.Empty<PreviewAxisRule>(),new PreviewAxisRule(0,0,true));
+bool lengthAxisConflict=false;
+try {
+    PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
+        lengthSource,0,1,new PreviewPoint(80,60),pinnedLength,lengthAxis);
+} catch(FormatException){lengthAxisConflict=true;}
+Assert(lengthAxisConflict,
+       "Pinned length plus pinned horizontal axis cannot silently violate either");
+bool doublePinnedLengthRejected=false;
+try {
+    var doubleLengths=PreviewPersistentLengthConstraints.Add(
+        lengthSource,pinnedLength,0,1);
+    PreviewPersistentLengthConstraints.MoveVertexOnPinnedLength(
+        lengthSource,0,1,new PreviewPoint(90,40),doubleLengths,
+        Array.Empty<PreviewAxisRule>());
+} catch(FormatException){doublePinnedLengthRejected=true;}
+Assert(doublePinnedLengthRejected,
+       "Two adjacent fixed-length edges require future multi-circle solver");
+bool invalidLengthEdgeRejected=false;
+try {PreviewPersistentLengthConstraints.Add(
+    lengthSource,pinnedLength,1,0);}
+catch(FormatException){invalidLengthEdgeRejected=true;}
+Assert(invalidLengthEdgeRejected,
+       "Cannot attach persistent length to a circular ARC-only hole");
+var initialLengthDxf=DxfReader.Parse(PreviewDxfExporter.Export(lengthSource));
+var lengthHistory=new DxfPreviewHistory(initialLengthDxf);
+lengthHistory.Push(initialLengthDxf,Array.Empty<PreviewAxisRule>(),pinnedLength);
+var changedLengthDxf=DxfReader.Parse(
+    PreviewDxfExporter.Export(projectedDifferent.Rings));
+lengthHistory.Push(changedLengthDxf,Array.Empty<PreviewAxisRule>(),pinnedLength);
+Assert(lengthHistory.CurrentLengthRules.SequenceEqual(pinnedLength),
+       "Committed geometry and saved length rule share one history state");
+lengthHistory.Undo();
+Assert(lengthHistory.CurrentLengthRules.SequenceEqual(pinnedLength),
+       "Undo geometry retains pinned length from previous state");
+lengthHistory.Undo();
+Assert(lengthHistory.CurrentLengthRules.Count==0,
+       "Undo pin restores state without length constraint");
+lengthHistory.Redo();
+Assert(lengthHistory.CurrentLengthRules.SequenceEqual(pinnedLength),
+       "Redo pin restores exact constrained length");
+var lengthUnpinned=PreviewPersistentLengthConstraints.Remove(pinnedLength,0,0);
+lengthHistory.Push(lengthHistory.Current,Array.Empty<PreviewAxisRule>(),lengthUnpinned);
+Assert(lengthHistory.CurrentLengthRules.Count==0 && !lengthHistory.CanRedo,
+       "Removing length pin discards stale redo branch");
+Assert(new DxfPreviewHistory(initialLengthDxf).CurrentLengthRules.Count==0 &&
+       Math.Abs(((PreviewLine)lengthSource[0].Segments[0]).End.X-100)<1e-7,
+       "New DXF session has no inherited length rules and original stays unchanged");
+
 Console.WriteLine("AI CutPro core checks passed.");
