@@ -1913,4 +1913,50 @@ foreach (double scale in new[] { 0.5d, 1d, 2d, 5d })
 Assert(verifiedFourLevelScenarios == 12,
        "All four-level translated/scaled 3D assembly regression cases ran");
 
+// B3 independent analytic oracle: four-level material hierarchy with
+// three concentric circular boundaries. This exercises ARC-derived topology,
+// not just the straight-edged nesting covered by the rectangular matrix.
+int verifiedCircularNesting = 0;
+foreach (var scale in new[] { 0.5d, 1d, 3d })
+foreach (var shift in new[] { 0d, 350d, 1500d })
+{
+    Point2 Shifted(double x, double y) => new(shift + scale*x, shift/2 + scale*y);
+    var circularHierarchy = Document(
+        Closed("BASE", Shifted(0,0), Shifted(1000,0),
+               Shifted(1000,1000), Shifted(0,1000)),
+        new DxfCircle("LARGE_VOID", Shifted(500,500), 300*scale),
+        new DxfCircle("MATERIAL_ISLAND", Shifted(500,500), 180*scale),
+        new DxfCircle("INNER_VOID", Shifted(500,500), 60*scale));
+    // Independent elementary geometry: outer square minus the large disc,
+    // plus the island disc, minus the innermost disc.
+    var expectedCircularArea = scale*scale *
+        (1_000_000d - Math.PI*(300d*300 - 180d*180 + 60d*60));
+    var circlePaths = PreviewDxfExporter.ValidateDocument(circularHierarchy);
+    var circleTopology = PreviewContourTopology.Analyze(circlePaths);
+    Assert(circleTopology.IsValid && circleTopology.Rings.Count == 4 &&
+           circleTopology.Rings.Count(r=>r.IsMaterialBoundary) == 2 &&
+           circleTopology.Rings.Count(r=>!r.IsMaterialBoundary) == 2 &&
+           Math.Abs(circleTopology.NetAreaMm2 - expectedCircularArea) <
+               Math.Max(1e-5, expectedCircularArea*1e-9),
+           "Concentric circle hierarchy matches independent analytic area");
+    var circleAssembly = DxfAssembly3DExporter.Export(circularHierarchy, 4);
+    Assert(circleAssembly.MaterialRegionCount == 2 &&
+           circleAssembly.HoleCount == 2 &&
+           circleAssembly.OpenScad.Split("cylinder(h = ").Length-1 == 3 &&
+           Math.Abs(circleAssembly.VolumeMm3 - expectedCircularArea*4) <
+               Math.Max(1e-4, expectedCircularArea*4e-9) &&
+           !circleAssembly.CanStartMachine,
+           "Concentric circle hierarchy exports three analytic cylinders and correct volume");
+    var circularDxf = PreviewDxfExporter.Export(circlePaths);
+    var roundtrippedCircles = PreviewDxfRoundTripVerifier.Verify(
+        circlePaths, circularDxf);
+    Assert(roundtrippedCircles.Count == 4 &&
+           Math.Abs(PreviewContourTopology.Analyze(roundtrippedCircles).NetAreaMm2 -
+                    expectedCircularArea) < Math.Max(1e-5, expectedCircularArea*1e-9),
+           "Three concentric circular rings survive analytic DXF round-trip");
+    verifiedCircularNesting++;
+}
+Assert(verifiedCircularNesting == 9,
+       "All translated and scaled concentric four-level scenarios ran");
+
 Console.WriteLine("AI CutPro core checks passed.");
