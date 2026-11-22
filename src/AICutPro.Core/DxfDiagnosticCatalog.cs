@@ -134,6 +134,27 @@ public static class DxfDiagnosticCatalog
         return ByCode("GEO-3099");
     }
 
+    /// <summary>
+    /// Resolve a layer only when the existing contour assembler explicitly
+    /// names that exact layer. Never guess a physical X/Y point from text.
+    /// Match the full prefix to preserve layer names containing spaces/colon.
+    /// </summary>
+    public static string? KnownIssueLayer(
+        string issue, IReadOnlyList<DxfShape> importedShapes)
+    {
+        ArgumentNullException.ThrowIfNull(issue);
+        ArgumentNullException.ThrowIfNull(importedShapes);
+        foreach (var layer in importedShapes.Select(shape => shape.Layer)
+                     .Where(layer => !string.IsNullOrWhiteSpace(layer))
+                     .Distinct(StringComparer.Ordinal)
+                     .OrderByDescending(layer => layer.Length))
+        {
+            if (issue.StartsWith("Layer " + layer + ": ", StringComparison.Ordinal))
+                return layer;
+        }
+        return null;
+    }
+
     public static string ExplainGeometryRu(string issue)
     {
         var help = ClassifyGeometry(issue);
