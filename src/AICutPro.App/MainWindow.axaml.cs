@@ -1102,6 +1102,64 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ConstrainEdgeHorizontalClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyEdgeAxisConstraint(horizontal:true);
+
+    private void ConstrainEdgeVerticalClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyEdgeAxisConstraint(horizontal:false);
+
+    private void ApplyEdgeAxisConstraint(bool horizontal)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var edgeNumber) ||
+                ringNumber<1 || edgeNumber<1)
+                throw new FormatException("Номера контура и ребра должны быть положительными.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var edited=PreviewAxisConstraintEditor.AlignEdge(
+                before,ringNumber-1,edgeNumber-1,horizontal,toleranceMm);
+            var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
+            var imported=DxfReader.Parse(serialized);
+            if (imported.Warnings.Count>0)
+                throw new FormatException("Результат DXF содержит неподдерживаемые данные.");
+            var reopened=PreviewDxfRoundTripVerifier.Verify(
+                edited.Rings,serialized,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            if(!topology.IsValid || reopened.Count!=edited.Rings.Count ||
+                Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
+                    Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
+                throw new FormatException("Ограничение не прошло повторную проверку DXF.");
+            if(reopened[ringNumber-1].Segments[edgeNumber-1] is not PreviewLine edge ||
+               (horizontal ? Math.Abs(edge.Start.Y-edge.End.Y)>1e-7
+                           : Math.Abs(edge.Start.X-edge.End.X)>1e-7))
+                throw new FormatException("Геометрическое ограничение потеряно при экспорте.");
+            CommitDxfPreview(imported);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: "+(horizontal?"горизонтальное":"вертикальное")+
+                " выравнивание ребра";
+            StatusText.Text=$"Контур №{ringNumber}, ребро №{edgeNumber}: "+
+                (horizontal?"горизонтально":"вертикально")+
+                $"; площадь {topology.NetAreaMm2:0.###} мм². "+
+                "Undo/Redo доступны. CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Выравнивание ребра отклонено: "+ex.Message;
+        }
+    }
+
     private void AddCircleHoleClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
