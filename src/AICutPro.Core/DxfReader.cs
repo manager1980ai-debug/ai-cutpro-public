@@ -104,6 +104,10 @@ public static class DxfReader
             {
                 if (i + 1 < pairs.Count && pairs[i + 1].Code == 70)
                 {
+                    // A malformed HEADER variable must not smuggle a second
+                    // unit value after the first one. Never silently choose.
+                    if (i + 2 < pairs.Count && pairs[i + 2].Code == 70)
+                        throw new FormatException("Duplicate DXF $INSUNITS value.");
                     if (!int.TryParse(pairs[i + 1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n))
                         throw new FormatException("Invalid $INSUNITS");
                     if (units.HasValue && units.Value != n)
