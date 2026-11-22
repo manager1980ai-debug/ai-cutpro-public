@@ -239,6 +239,132 @@ def check_closed_contour_graph(entities, tolerance=1e-5):
     return len(vertices), len(edges)
 
 
+
+def _sample_edge(entity, forward=True):
+    """Construct display-level polylines for independent ring containment."""
+    if entity.dxftype() == "LINE":
+        result = list(_endpoints(entity))
+    else:
+        center = entity.dxf.center
+        radius = float(entity.dxf.radius)
+        start = float(entity.dxf.start_angle)
+        sweep = (float(entity.dxf.end_angle)-start) % 360
+        # Fine sampled containment only; NOT a precision offset/CAM operation.
+        count = max(24, math.ceil(sweep / 1.0))
+        result = [
+            (float(center.x)+radius*math.cos(math.radians(start+sweep*i/count)),
+             float(center.y)+radius*math.sin(math.radians(start+sweep*i/count)))
+            for i in range(count+1)
+        ]
+    return result if forward else result[::-1]
+
+
+def _point_in_ring(point, polygon, tolerance=1e-7):
+    """Return 1 inside, 0 outside, -1 on boundary (ray parity)."""
+    x, y = point
+    inside = False
+    for a, b in zip(polygon, polygon[1:]):
+        ab = _subtract(b, a)
+        ap = _subtract(point, a)
+        length = math.hypot(*ab)
+        if length <= 1e-12:
+            continue
+        if abs(_cross(ab, ap))/length <= tolerance and (
+            min(a[0],b[0])-tolerance <= x <= max(a[0],b[0])+tolerance and
+            min(a[1],b[1])-tolerance <= y <= max(a[1],b[1])+tolerance
+        ):
+            return -1
+        if (a[1] > y) != (b[1] > y):
+            x_cross = a[0]+(y-a[1])*(b[0]-a[0])/(b[1]-a[1])
+            if x_cross > x:
+                inside = not inside
+    return 1 if inside else 0
+
+
+def check_ring_nesting(entities, expected_rings=None, expected_holes=None,
+                       tolerance=1e-5):
+    """Independent ring extraction and nesting parity, not CAD certification.
+
+    Even nesting depths are material islands, odd nesting depths are holes.
+    Disconnected outer rings are allowed. A caller must state expected hole
+    count when the intended semantic role needs enforcing.
+    """
+    vertices = []
+    adjacency = []
+    def vertex(p):
+        for i, q in enumerate(vertices):
+            if math.dist(p,q) <= tolerance:
+                return i
+        vertices.append(p)
+        adjacency.append([])
+        return len(vertices)-1
+    edge_nodes = []
+    for i, entity in enumerate(entities):
+        a,b = (vertex(p) for p in _endpoints(entity))
+        if a == b:
+            raise AssertionError("Collapsed ring edge")
+        adjacency[a].append(i)
+        adjacency[b].append(i)
+        edge_nodes.append((a,b))
+    if any(len(edges)!=2 for edges in adjacency):
+        raise AssertionError("Noncycle edge graph in nesting check")
+    unused = set(range(len(entities)))
+    rings = []
+    while unused:
+        first = min(unused)
+        start = edge_nodes[first][0]
+        current = start
+        ring = []
+        for _ in range(len(entities)+1):
+            choices = sorted(e for e in adjacency[current] if e in unused)
+            if len(choices)!=1:
+                raise AssertionError("Ambiguous ring traversal")
+            edge_id = choices[0]
+            unused.remove(edge_id)
+            a,b = edge_nodes[edge_id]
+            forward = current == a
+            points = _sample_edge(entities[edge_id], forward)
+            if ring:
+                if math.dist(ring[-1],points[0]) > tolerance:
+                    raise AssertionError("Ring has inconsistent joined vertices")
+                ring.extend(points[1:])
+            else:
+                ring.extend(points)
+            current = b if forward else a
+            if current == start:
+                break
+        else:
+            raise AssertionError("Unclosed ring traversal")
+        if len(ring)<4 or math.dist(ring[0],ring[-1]) > tolerance:
+            raise AssertionError("Invalid sampled ring")
+        area = sum(a[0]*b[1]-b[0]*a[1]
+                   for a,b in zip(ring,ring[1:]))/2
+        if abs(area) <= tolerance*tolerance:
+            raise AssertionError("Degenerate ring area")
+        rings.append(ring)
+    if expected_rings is not None and len(rings)!=expected_rings:
+        raise AssertionError(f"Expected {expected_rings} rings, got {len(rings)}")
+
+    depths = []
+    for i, ring in enumerate(rings):
+        # A boundary vertex is a valid probe because distinct rings must not
+        # intersect or touch (checked independently before this function).
+        probe = ring[0]
+        depth = 0
+        for j, outer in enumerate(rings):
+            if i==j:
+                continue
+            relation = _point_in_ring(probe,outer,tolerance)
+            if relation < 0:
+                raise AssertionError("Touching ring boundaries")
+            depth += relation
+        depths.append(depth)
+    holes = sum(depth % 2 for depth in depths)
+    if expected_holes is not None and holes != expected_holes:
+        raise AssertionError(f"Expected {expected_holes} holes, got {holes}")
+    return len(rings), holes
+
+
 def run_negative_graph_regressions():
     """Known-bad independent inputs must never pass the graph audit."""
     doc = ezdxf.new()
@@ -312,6 +438,41 @@ def run_negative_graph_regressions():
     separate_arcs.add_arc((0, 0), 10, 0, 90)
     separate_arcs.add_arc((40, 0), 10, 0, 90)
     check_curved_intersections(list(separate_arcs))
+    def add_rectangle(space, x0, y0, x1, y1):
+        points = [(x0,y0),(x1,y0),(x1,y1),(x0,y1)]
+        for a,b in zip(points,points[1:]+points[:1]):
+            space.add_line(a,b)
+    nested = ezdxf.new().modelspace()
+    add_rectangle(nested,0,0,100,100)
+    add_rectangle(nested,20,20,40,40)
+    if check_ring_nesting(list(nested),2,1) != (2,1):
+        raise AssertionError("Nested hole classification regression")
+    separate = ezdxf.new().modelspace()
+    add_rectangle(separate,0,0,10,10)
+    add_rectangle(separate,20,0,30,10)
+    if check_ring_nesting(list(separate),2,0) != (2,0):
+        raise AssertionError("Disjoint parts classification regression")
+    try:
+        check_ring_nesting(list(separate),2,1)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative regression: outside hole accepted")
+    nested_island = ezdxf.new().modelspace()
+    add_rectangle(nested_island,0,0,100,100)
+    add_rectangle(nested_island,10,10,90,90)
+    add_rectangle(nested_island,20,20,30,30)
+    if check_ring_nesting(list(nested_island),3,1) != (3,1):
+        raise AssertionError("Third nesting level must be a material island")
+    touching_rings = ezdxf.new().modelspace()
+    add_rectangle(touching_rings,0,0,100,100)
+    add_rectangle(touching_rings,0,20,20,40)
+    try:
+        check_closed_contour_graph(list(touching_rings))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative regression: touching rings accepted")
 
 
 def check_sample(root: pathlib.Path, case: dict) -> None:
@@ -337,6 +498,8 @@ def check_sample(root: pathlib.Path, case: dict) -> None:
     vertex_count, edge_count = check_closed_contour_graph(entities)
     check_line_intersections(entities)
     check_curved_intersections(entities)
+    ring_count, hole_count = check_ring_nesting(entities,
+        case.get('expected_rings'),case.get('expected_holes'))
     radii = []
     perimeter = 0.0
     for entity in entities:
@@ -368,7 +531,8 @@ def check_sample(root: pathlib.Path, case: dict) -> None:
     print(
         f"{path.name}: independent ezdxf PASS, "
         f"{case['lines']} lines, {case['arcs']} arcs, "
-        f"perimeter {perimeter:.6f} mm, graph {vertex_count} vertices/{edge_count} edges"
+        f"perimeter {perimeter:.6f} mm, graph {vertex_count} vertices/{edge_count} edges, "
+        f"{ring_count} rings/{hole_count} holes"
     )
 
 
