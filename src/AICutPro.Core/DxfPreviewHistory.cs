@@ -55,7 +55,7 @@ public sealed class DxfPreviewHistory
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(source.Shapes);
         ArgumentNullException.ThrowIfNull(source.Warnings);
-        var shapes = source.Shapes.Select(shape => shape switch
+        var shapes = source.Shapes.Select<DxfShape, DxfShape>(shape => shape switch
         {
             DxfLine line => line with { },
             DxfCircle circle => circle with { },
