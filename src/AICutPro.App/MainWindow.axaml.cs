@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private WorkspaceGeometry _workspace = WorkspaceGeometry.Default;
     private VirtualMachine _virtualMachine = VirtualMachine.Create(WorkspaceGeometry.Default);
     private DxfImportResult? _dxfPreview;
+    private DxfPreviewHistory? _dxfHistory;
     private int? _selectedPlacement;
     private double _zoom = 1;
     private double _panX, _panY;
@@ -422,7 +423,8 @@ public partial class MainWindow : Window
                     : " Аналитическая вложенность не подтверждена: " +
                       string.Join("; ", nested.Issues.Take(2));
             }
-            _dxfPreview = imported;
+            _dxfHistory = new DxfPreviewHistory(imported);
+            _dxfPreview = _dxfHistory.Current;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -440,6 +442,50 @@ public partial class MainWindow : Window
         {
             StatusText.Text = $"Не удалось прочитать DXF: {ex.Message}";
         }
+    }
+
+    // Only call after an edit has completed its existing topology and DXF
+    // round-trip checks. Commit both the preview and its undo snapshot together.
+    private void CommitDxfPreview(DxfImportResult verified)
+    {
+        if (_dxfHistory is null)
+            throw new InvalidOperationException("No active DXF editing session.");
+        _dxfHistory.Push(verified);
+        _dxfPreview = _dxfHistory.Current;
+    }
+
+    private void UndoDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_dxfHistory is null || !_dxfHistory.CanUndo)
+        {
+            StatusText.Text = "Нет изменений DXF для отмены.";
+            return;
+        }
+        _dxfPreview = _dxfHistory.Undo();
+        ResetView();
+        UpdatePartCard();
+        UpdateHoleSummary();
+        PanelTitle.Text = "DXF: отмена изменения, только предпросмотр";
+        StatusText.Text = $"Изменение отменено. Доступно отмен: {_dxfHistory.UndoCount}, повторов: {_dxfHistory.RedoCount}. CAM и резка запрещены.";
+        RenderSheet();
+    }
+
+    private void RedoDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_dxfHistory is null || !_dxfHistory.CanRedo)
+        {
+            StatusText.Text = "Нет изменений DXF для повтора.";
+            return;
+        }
+        _dxfPreview = _dxfHistory.Redo();
+        ResetView();
+        UpdatePartCard();
+        UpdateHoleSummary();
+        PanelTitle.Text = "DXF: повтор изменения, только предпросмотр";
+        StatusText.Text = $"Изменение повторено. Доступно отмен: {_dxfHistory.UndoCount}, повторов: {_dxfHistory.RedoCount}. CAM и резка запрещены.";
+        RenderSheet();
     }
 
     private void EditDxfVertexClicked(object? sender,
@@ -476,7 +522,7 @@ public partial class MainWindow : Window
                 Math.Abs(checkedTopology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,edited.NetAreaMm2*1e-9))
                 throw new FormatException("Изменённый DXF не прошёл повторную проверку.");
-            _dxfPreview=imported;
+            CommitDxfPreview(imported);
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -547,7 +593,7 @@ public partial class MainWindow : Window
                 Math.Abs(topology.NetAreaMm2 - edited.NetAreaMm2) >
                     Math.Max(1e-6, Math.Abs(edited.NetAreaMm2) * 1e-9))
                 throw new FormatException("Изменённый контур не прошёл DXF-проверку.");
-            _dxfPreview = candidate;
+            CommitDxfPreview(candidate);
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -606,7 +652,7 @@ public partial class MainWindow : Window
                 Math.Max(1e-6, Math.Abs(lengthMm) * 1e-9))
                 throw new FormatException("Повторно открытый DXF изменил заданный размер.");
 
-            _dxfPreview = candidate;
+            CommitDxfPreview(candidate);
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -666,7 +712,7 @@ public partial class MainWindow : Window
             if (Math.Abs(angularError) > 1e-8)
                 throw new FormatException("Повторно открытый DXF изменил заданный угол.");
 
-            _dxfPreview = candidate;
+            CommitDxfPreview(candidate);
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -715,7 +761,7 @@ public partial class MainWindow : Window
 
             // Preserve the actual CIRCLE entity for subsequent edits. Mutate the
             // preview only after all topology and serialization checks succeed.
-            _dxfPreview = updated;
+            CommitDxfPreview(updated);
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -809,7 +855,8 @@ public partial class MainWindow : Window
                Math.Abs(measured.NetAreaMm2-model.NetAreaMm2)>
                    Math.Max(1e-6,model.NetAreaMm2*1e-9))
                 throw new FormatException("Analytical area mismatch in text sketch.");
-            _dxfPreview=model.Drawing2D;
+            _dxfHistory = new DxfPreviewHistory(model.Drawing2D);
+            _dxfPreview = _dxfHistory.Current;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -907,6 +954,7 @@ public partial class MainWindow : Window
     {
         _step = 0;
         _dxfPreview = null;
+        _dxfHistory = null;
         ResetView();
         PanelTitle.Text = $"Раскрой листа {_workspace.MaterialSheet.WidthMm:0.###} × {_workspace.MaterialSheet.HeightMm:0.###} мм";
         _result = ShelfNester.Arrange(_workspace.MaterialSheet, SampleJob.Parts);
