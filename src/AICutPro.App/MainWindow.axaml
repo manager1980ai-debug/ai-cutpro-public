@@ -70,6 +70,8 @@
           <TextBox x:Name="EditVertexXBox" Text="0" Watermark="Новый X, мм"/>
           <TextBox x:Name="EditVertexYBox" Text="0" Watermark="Новый Y, мм"/>
           <Button Content="Переместить вершину с учётом ограничений" Click="EditDxfVertexClicked"/>
+          <Button Content="Переместить связанные вершины (по ограничениям)" Click="PropagateConstrainedVerticesClicked"/>
+          <TextBlock Text="Перемещение связанных вершин: координаты X/Y передаются по цепочкам закреплённых вертикальных/горизонтальных рёбер. Проверяются отверстия, топология и DXF; если результат недопустим, операция отменяется." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Вставить вершину на ребро (предпросмотр)" Click="InsertDxfVertexClicked"/>
           <Button Content="Удалить вершину (предпросмотр)" Click="DeleteDxfVertexClicked"/>
           <TextBlock Text="Фаска прямолинейного угла (отступ по обоим рёбрам, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
