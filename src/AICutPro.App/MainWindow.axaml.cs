@@ -766,6 +766,47 @@ public partial class MainWindow : Window
         }
     }
 
+    private void EditArcCircleDiameterClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Некорректный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber) || ringNumber<1)
+                throw new FormatException("Номер контура должен быть положительным.");
+            if (!(double.TryParse(HoleDiameterBox.Text,NumberStyles.Float,
+                      CultureInfo.CurrentCulture,out var diameter) ||
+                  double.TryParse(HoleDiameterBox.Text,NumberStyles.Float,
+                      CultureInfo.InvariantCulture,out diameter)) ||
+                !double.IsFinite(diameter))
+                throw new FormatException("Неверный диаметр окружности.");
+
+            var updated=PreviewArcCircleEditor.SetDiameter(
+                _dxfPreview,ringNumber-1,diameter,toleranceMm);
+            var rings=PreviewDxfExporter.ValidateDocument(updated,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(rings,toleranceMm);
+            if(!topology.IsValid)
+                throw new FormatException("Изменённый ARC-DXF не прошёл проверку.");
+            CommitDxfPreview(updated);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: изменение диаметра окружности из ARC";
+            StatusText.Text=$"Контур №{ringNumber}, диаметр Ø{diameter:0.###} мм; " +
+                $"площадь {topology.NetAreaMm2:0.###} мм². " +
+                "Undo/Redo доступны, CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch (Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Изменение ARC-окружности отклонено: "+ex.Message;
+        }
+    }
+
     private void EditCircleHoleClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
