@@ -1441,4 +1441,44 @@ var islandDoc = Document(rectangle,innerHole,
 Assert(RejectSynchronized3D(islandDoc,4),
        "3D refuses nested material island instead of silently losing it");
 
+// B2 closing regression: multi-part and material-island CSG from current DXF.
+var assemblyTwoParts = DxfAssembly3DExporter.Export(twoPartsDoc, 6);
+Assert(assemblyTwoParts.MaterialRegionCount == 2 &&
+       assemblyTwoParts.HoleCount == 0 &&
+       assemblyTwoParts.OpenScad.Contains("union()") &&
+       assemblyTwoParts.OpenScad.Split("difference()").Length-1 == 2 &&
+       Math.Abs(assemblyTwoParts.VolumeMm3-(20000+400)*6)<1e-6,
+       "Two separate DXF parts become two material regions in 3D CSG");
+var assemblyIsland = DxfAssembly3DExporter.Export(islandDoc, 4);
+Assert(assemblyIsland.MaterialRegionCount == 2 &&
+       assemblyIsland.HoleCount == 1 &&
+       assemblyIsland.OpenScad.Split("difference()").Length-1 == 2 &&
+       Math.Abs(assemblyIsland.VolumeMm3-(20000-400+25)*4)<1e-6,
+       "A nested material island is restored after subtracting its containing hole");
+var assemblyMixed = DxfAssembly3DExporter.Export(
+    Document(rectangle,innerHole,circleHole),5);
+Assert(assemblyMixed.MaterialRegionCount == 1 &&
+       assemblyMixed.HoleCount == 2 &&
+       assemblyMixed.OpenScad.Contains("cylinder(h = ") &&
+       assemblyMixed.OpenScad.Contains("polygon(points = [[20, 20]") &&
+       Math.Abs(assemblyMixed.VolumeMm3 -
+           (20000-400-Math.PI*100)*5)<1e-6,
+       "Mixed polygonal and round DXF holes export into one 3D part");
+var assemblyUndo = new DxfPreviewHistory(withAddedHole);
+assemblyUndo.Push(currentHoleMoved);
+var volumeBefore = DxfAssembly3DExporter.Export(assemblyUndo.Current,5).VolumeMm3;
+var volumeAfterUndo = DxfAssembly3DExporter.Export(assemblyUndo.Undo(),5).VolumeMm3;
+Assert(volumeAfterUndo>volumeBefore &&
+       Math.Abs(volumeAfterUndo - (20000-Math.PI*100)*5)<1e-6,
+       "3D assembly follows current DXF undo state including hole dimensions");
+static bool RejectAssembly3D(DxfImportResult drawing,double thickness)
+{
+    try { DxfAssembly3DExporter.Export(drawing,thickness); return false; }
+    catch(FormatException) {return true;}
+}
+Assert(RejectAssembly3D(Document(new DxfCircle("CUT",new Point2(0,0),20)),0) &&
+       RejectAssembly3D(Document(rectangle,innerHole),double.NaN) &&
+       RejectAssembly3D(Document(rectangle,innerHole),double.PositiveInfinity),
+       "3D assembly exporter rejects invalid thickness without generating files");
+
 Console.WriteLine("AI CutPro core checks passed.");
