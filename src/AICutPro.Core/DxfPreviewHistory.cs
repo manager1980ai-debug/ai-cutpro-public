@@ -12,12 +12,14 @@ public sealed class DxfPreviewHistory
 
     private readonly List<DxfImportResult> _states = [];
     private readonly List<IReadOnlyList<PreviewAxisRule>> _axisRules = [];
+    private readonly List<IReadOnlyList<PreviewLengthRule>> _lengthRules = [];
     private int _index;
 
     public DxfPreviewHistory(DxfImportResult initial)
     {
         _states.Add(Snapshot(initial));
         _axisRules.Add([]);
+        _lengthRules.Add([]);
     }
 
     public bool CanUndo => _index > 0;
@@ -27,33 +29,46 @@ public sealed class DxfPreviewHistory
     public DxfImportResult Current => Snapshot(_states[_index]);
     public IReadOnlyList<PreviewAxisRule> CurrentAxisRules =>
         _axisRules[_index].ToArray();
+    public IReadOnlyList<PreviewLengthRule> CurrentLengthRules =>
+        _lengthRules[_index].ToArray();
 
     /// <summary>Call only after an edit has passed geometry and DXF verification.</summary>
     public void Push(DxfImportResult verifiedEdit) =>
-        Push(verifiedEdit,CurrentAxisRules);
+        Push(verifiedEdit,CurrentAxisRules,CurrentLengthRules);
 
     /// <summary>
     /// Save geometry and persistent drafting relations in one Undo/Redo step.
     /// Caller must verify both geometry and axis rules before committing.
     /// </summary>
     public void Push(DxfImportResult verifiedEdit,
-                     IReadOnlyList<PreviewAxisRule> rules)
+                     IReadOnlyList<PreviewAxisRule> rules) =>
+        Push(verifiedEdit,rules,CurrentLengthRules);
+
+    public void Push(DxfImportResult verifiedEdit,
+                     IReadOnlyList<PreviewAxisRule> rules,
+                     IReadOnlyList<PreviewLengthRule> lengths)
     {
         ArgumentNullException.ThrowIfNull(rules);
+        ArgumentNullException.ThrowIfNull(lengths);
         var clone=Snapshot(verifiedEdit);
         if(rules.Count>PreviewPersistentAxisConstraints.MaximumRules)
             throw new FormatException("Too many persistent axis constraints.");
+        if(lengths.Count>PreviewPersistentLengthConstraints.MaximumRules)
+            throw new FormatException("Too many persistent length constraints.");
         if(_index < _states.Count-1)
         {
             _states.RemoveRange(_index+1,_states.Count-1-_index);
             _axisRules.RemoveRange(_index+1,_axisRules.Count-1-_index);
+            _lengthRules.RemoveRange(_index+1,_lengthRules.Count-1-_index);
         }
         _states.Add(clone);
         _axisRules.Add(rules.ToArray());
+        _lengthRules.Add(lengths.ToArray());
         if(_states.Count>MaximumStates)
         {
             _states.RemoveAt(0);
             _axisRules.RemoveAt(0);
+            _lengthRules.RemoveAt(0);
         }
         _index=_states.Count-1;
     }
