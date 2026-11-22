@@ -875,6 +875,49 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void ExportPlate3DClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            // Always regenerate from the text parameters. Later DXF edits do
+            // not implicitly mutate the 3D model or claim a synced B-rep.
+            var plate = TextPlateSketch.Parse(TextSketchBox.Text ?? "");
+            var scad = PlateOpenScadExporter.Export(plate);
+            var target = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Сохранить параметрическую 3D-модель OpenSCAD",
+                SuggestedFileName = "AI-CutPro-plate-3d.scad",
+                DefaultExtension = "scad",
+                FileTypeChoices =
+                [
+                    new FilePickerFileType("OpenSCAD CAD model")
+                    {
+                        Patterns = ["*.scad"],
+                        MimeTypes = ["text/plain"]
+                    }
+                ]
+            });
+            if (target is null)
+            {
+                StatusText.Text = "Сохранение 3D-модели отменено.";
+                return;
+            }
+            await using var stream = await target.OpenWriteAsync();
+            using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(scad);
+            await writer.FlushAsync();
+            StatusText.Text = $"3D-модель сохранена: {plate.WidthMm:0.###} × " +
+                $"{plate.HeightMm:0.###} × {plate.ThicknessMm:0.###} мм, " +
+                $"отверстий {plate.Holes.Count}, объём {plate.VolumeMm3:0.###} мм³. " +
+                "OpenSCAD F6 для построения тела; это не программа станка.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or IOException)
+        {
+            StatusText.Text = "Не удалось экспортировать 3D-модель: " + ex.Message;
+        }
+    }
+
     private void BuildTextSketchClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
