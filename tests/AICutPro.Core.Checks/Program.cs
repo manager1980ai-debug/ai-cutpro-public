@@ -1141,4 +1141,39 @@ Assert(RejectEdgeAngle([editSquare],0,0,90) &&
 Assert(RejectEdgeAngle([roofOutline,roofHole],0,2,0),
        "Angle editing must reject edits that destroy nested hole ownership");
 
+// Round-trip integrity must compare each ring, not merely its total area.
+// A changed rectangle can preserve area while altering width/height.
+var verifiedRect = PreviewDxfRoundTripVerifier.Verify(
+    [editSquare],PreviewDxfExporter.Export([editSquare]));
+Assert(verifiedRect.Count == 1 && verifiedRect[0].Segments.Count == 4,
+       "Per-ring round-trip integrity accepts unchanged straight geometry");
+var holeChecked = PreviewDxfRoundTripVerifier.Verify(
+    [outerRing,innerRing],PreviewDxfExporter.Export([outerRing,innerRing]));
+Assert(holeChecked.Count == 2,
+       "Round-trip verifier preserves nested hole and material area");
+var curveChecked = PreviewDxfRoundTripVerifier.Verify(
+    [safeSemicircle],PreviewDxfExporter.Export([safeSemicircle]));
+Assert(curveChecked.Count == 1 &&
+       curveChecked[0].Segments.Any(s => s is PreviewArc),
+       "Round-trip verifier preserves analytic circular arcs");
+static bool RejectAlteredDxf(IReadOnlyList<PreviewPath> original, string content)
+{
+    try { PreviewDxfRoundTripVerifier.Verify(original,content); return false; }
+    catch (FormatException) { return true; }
+}
+var sameAreaDifferentShape = new PreviewPath([
+    new PreviewLine(new(0,0),new(20,0)),
+    new PreviewLine(new(20,0),new(20,5)),
+    new PreviewLine(new(20,5),new(0,5)),
+    new PreviewLine(new(0,5),new(0,0))
+],true);
+Assert(RejectAlteredDxf([editSquare],PreviewDxfExporter.Export([sameAreaDifferentShape])),
+       "DXF geometry change is rejected even when net area stays identical");
+var shiftedRect = PreviewContourTransform.Move(editSquare,2,0);
+Assert(RejectAlteredDxf([editSquare],PreviewDxfExporter.Export([shiftedRect])),
+       "A translation with identical area and perimeter is still detected");
+Assert(RejectAlteredDxf([outerRing,innerRing],
+       PreviewDxfExporter.Export([outerRing])),
+       "Dropping a nested hole from DXF export fails integrity check");
+
 Console.WriteLine("AI CutPro core checks passed.");
