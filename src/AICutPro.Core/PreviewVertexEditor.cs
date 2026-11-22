@@ -65,6 +65,7 @@ public static class PreviewVertexEditor
         if(!checkedTopology.IsValid)
             throw new FormatException("Vertex edit invalidates ring topology: " +
                 string.Join("; ",checkedTopology.Issues));
+        EnsureNestingUnchanged(original, checkedTopology);
         return new(updated,checkedTopology.NetAreaMm2,true);
     }
 
@@ -115,6 +116,7 @@ public static class PreviewVertexEditor
         if (!verified.IsValid)
             throw new FormatException("Vertex deletion invalidates ring topology: " +
                 string.Join("; ", verified.Issues));
+        EnsureNestingUnchanged(original, verified);
         return new(updated, verified.NetAreaMm2, true);
     }
 
@@ -172,6 +174,28 @@ public static class PreviewVertexEditor
             Math.Max(1e-7, Math.Abs(original.NetAreaMm2) * 1e-10))
             throw new FormatException("Insertion changes verified contour geometry.");
         return new(updated, verified.NetAreaMm2, true);
+    }
+
+    // Valid rings are not enough: changing a hole into an independent part,
+    // or silently changing a material island into a void, is a drafting error.
+    // Preserve the original ring ownership and parity across vertex edits.
+    private static void EnsureNestingUnchanged(
+        PreviewTopologyResult original, PreviewTopologyResult updated)
+    {
+        if (!original.IsValid || !updated.IsValid ||
+            original.Rings.Count != updated.Rings.Count)
+            throw new FormatException("Contour nesting cannot be verified.");
+        for (int i = 0; i < original.Rings.Count; i++)
+        {
+            var before = original.Rings[i];
+            var after = updated.Rings[i];
+            if (before.Index != after.Index ||
+                before.ParentIndex != after.ParentIndex ||
+                before.Depth != after.Depth ||
+                before.IsMaterialBoundary != after.IsMaterialBoundary)
+                throw new FormatException(
+                    "Vertex edit would change which contours are holes or material islands.");
+        }
     }
 
     private static double Distance(PreviewPoint a,PreviewPoint b) =>
