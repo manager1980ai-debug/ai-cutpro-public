@@ -470,7 +470,7 @@ public partial class MainWindow : Window
             // Reimport the proposed drawing before replacing current preview.
             var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
             var imported=DxfReader.Parse(serialized);
-            var reopened=PreviewDxfExporter.ValidateDocument(imported,toleranceMm);
+            var reopened=PreviewDxfRoundTripVerifier.Verify(edited.Rings,serialized,toleranceMm);
             var checkedTopology=PreviewContourTopology.Analyze(reopened,toleranceMm);
             if (!checkedTopology.IsValid || reopened.Count != edited.Rings.Count ||
                 Math.Abs(checkedTopology.NetAreaMm2-edited.NetAreaMm2)>
