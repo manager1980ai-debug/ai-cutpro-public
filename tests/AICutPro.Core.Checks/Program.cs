@@ -162,6 +162,60 @@ catch (FormatException) {unclosedExportBlocked=true;}
 Assert(unclosedExportBlocked,
        "Incomplete DXF cannot be saved as a verified edited drawing");
 
+// B1 structural DXF guards: nested sections, unmatched terminators and
+// geometry after EOF must never be accepted for edited drawing export.
+var nestedSections = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4",
+    "0","SECTION","2","ENTITIES",
+    "0","LWPOLYLINE","90","4","70","1",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10",
+    "0","ENDSEC","0","EOF"
+}));
+Assert(nestedSections.Warnings.Any(w=>w.Contains("nested or malformed SECTION")),
+       "Nested DXF sections are flagged and cannot silently validate");
+bool nestedExportBlocked = false;
+try { PreviewDxfExporter.ValidateDocument(nestedSections); }
+catch (FormatException) { nestedExportBlocked = true; }
+Assert(nestedExportBlocked, "Nested DXF sections must block verified export");
+var unmatchedEndsec = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","ENDSEC","0","SECTION","2","HEADER","9","$INSUNITS","70","4",
+    "0","ENDSEC","0","SECTION","2","ENTITIES","0","ENDSEC","0","EOF"
+}));
+Assert(unmatchedEndsec.Warnings.Any(w=>w.Contains("ENDSEC has no matching SECTION")),
+       "Unmatched DXF ENDSEC is diagnosed explicitly");
+var prematureEof = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4",
+    "0","ENDSEC","0","SECTION","2","ENTITIES",
+    "0","EOF",
+    "0","LINE","10","0","20","0","11","10","21","0"
+}));
+Assert(prematureEof.Shapes.Count == 0 &&
+       prematureEof.Warnings.Any(w=>w.Contains("EOF occurs before ENDSEC")) &&
+       prematureEof.Warnings.Any(w=>w.Contains("data after EOF")),
+       "Premature EOF prevents trailing entities from entering the DXF model");
+var trailingEofData = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","LWPOLYLINE","90","4","70","1",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10",
+    "0","ENDSEC","0","EOF",
+    "0","LINE","10","0","20","0","11","10","21","0"
+}));
+Assert(trailingEofData.Shapes.Count == 1 &&
+       trailingEofData.Warnings.Any(w=>w.Contains("data after EOF")),
+       "Data after EOF is not parsed as additional geometry");
+bool trailingExportBlocked = false;
+try { PreviewDxfExporter.ValidateDocument(trailingEofData); }
+catch (FormatException) { trailingExportBlocked = true; }
+Assert(trailingExportBlocked,
+       "DXF with data after EOF cannot pass verified export");
+
 var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
 Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
 var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
