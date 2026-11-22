@@ -93,6 +93,9 @@ public static class DxfDiagnosticCatalog
         if (error is FormatException &&
             (message.Contains("Truncated", StringComparison.OrdinalIgnoreCase) ||
              message.Contains("DXF group", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("Invalid DXF number", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("Invalid DXF integer", StringComparison.OrdinalIgnoreCase) ||
+             message.Contains("Invalid DXF group code", StringComparison.OrdinalIgnoreCase) ||
              message.Contains("Missing required", StringComparison.OrdinalIgnoreCase) ||
              message.Contains("Invalid $INSUNITS", StringComparison.Ordinal) ||
              message.Contains("Conflicting DXF", StringComparison.Ordinal)))
