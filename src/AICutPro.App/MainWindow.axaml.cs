@@ -47,6 +47,21 @@ public partial class MainWindow : Window
         SheetCanvas.PointerMoved += CanvasPointerMoved;
         SheetCanvas.PointerReleased += CanvasPointerReleased;
         UpdateSummary();
+        // Open a DXF directly from the command line, without a file-picker.
+        // This is also useful for file associations and UI acceptance tests.
+        Opened += (_, _) =>
+        {
+            var args = Environment.GetCommandLineArgs();
+            if (args.Length != 3 || args[1] != "--open-dxf") return;
+            try
+            {
+                var file = new FileInfo(args[2]);
+                if (file.Length is <= 0 or > 8_000_000)
+                    throw new FormatException("DXF file must contain 1..8000000 bytes.");
+                ImportDxfBytes(File.ReadAllBytes(file.FullName));
+            }
+            catch (Exception ex) { ReportDxfImportFailure(ex); }
+        };
     }
 
     private void UpdateSummary()
@@ -373,7 +388,19 @@ public partial class MainWindow : Window
                     throw new FormatException("DXF exceeds maximum supported size (8 MB).");
                 data.Write(buffer, 0, read);
             }
-            var loaded = DxfFileReader.Read(data.ToArray());
+            ImportDxfBytes(data.ToArray());
+        }
+        catch (Exception ex) { ReportDxfImportFailure(ex); }
+    }
+
+    private void ImportDxfBytes(byte[] bytes)
+    {
+        try
+        {
+            _dxfDiagnostics = [];
+            if (bytes.Length is <= 0 or > 8_000_000)
+                throw new FormatException("DXF file must contain 1..8000000 bytes.");
+            var loaded = DxfFileReader.Read(bytes);
             if (!TryParseGeometryTolerance(DxfToleranceBox.Text, out var toleranceMm))
             {
                 StatusText.Text = "Укажите допуск DXF от 0,0001 до 1 мм. Импорт отклонён.";
@@ -476,15 +503,17 @@ public partial class MainWindow : Window
             }
             RenderSheet();
         }
-        catch (Exception ex)
-        {
-            _dxfDiagnostics =
-            [
-                new DxfDiagnosticFinding(DxfDiagnosticCatalog.Classify(ex), ex.Message)
-            ];
-            StatusText.Text = "Не удалось прочитать DXF. " + DxfDiagnosticCatalog.ExplainRu(ex) +
-                              " Откройте «Диагностика DXF (все замечания)» для подробностей.";
-        }
+        catch (Exception ex) { ReportDxfImportFailure(ex); }
+    }
+
+    private void ReportDxfImportFailure(Exception ex)
+    {
+        _dxfDiagnostics =
+        [
+            new DxfDiagnosticFinding(DxfDiagnosticCatalog.Classify(ex), ex.Message)
+        ];
+        StatusText.Text = "Не удалось прочитать DXF. " + DxfDiagnosticCatalog.ExplainRu(ex) +
+                          " Откройте «Диагностика DXF (все замечания)» для подробностей.";
     }
 
     // Only call after an edit has completed its existing topology and DXF
