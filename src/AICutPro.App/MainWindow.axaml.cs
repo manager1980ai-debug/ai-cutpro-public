@@ -493,6 +493,77 @@ public partial class MainWindow : Window
         }
     }
 
+    // Numbered segment and vertex editing is deliberately restricted to
+    // fully verified, closed straight-line rings. Nothing is sent to a machine.
+    private void InsertDxfVertexClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyLineVertexChange(insert: true);
+
+    private void DeleteDxfVertexClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyLineVertexChange(insert: false);
+
+    private void ApplyLineVertexChange(bool insert)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте 2D-эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text, out var toleranceMm))
+                throw new FormatException("Некорректный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out var vertexNumber) ||
+                ringNumber < 1 || vertexNumber < 1)
+                throw new FormatException("Номер контура и вершины должен быть положительным.");
+
+            var verified = PreviewDxfExporter.ValidateDocument(_dxfPreview, toleranceMm);
+            PreviewVertexEditResult edited;
+            if (insert)
+            {
+                static bool ParseCoordinate(string? raw, out double value) =>
+                    (double.TryParse(raw, NumberStyles.Float, CultureInfo.CurrentCulture, out value) ||
+                     double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) &&
+                    double.IsFinite(value) && Math.Abs(value) <= 1_000_000;
+                if (!ParseCoordinate(EditVertexXBox.Text, out var x) ||
+                    !ParseCoordinate(EditVertexYBox.Text, out var y))
+                    throw new FormatException("Неверные координаты новой вершины.");
+                edited = PreviewVertexEditor.InsertVertex(
+                    verified, ringNumber - 1, vertexNumber - 1, new PreviewPoint(x,y), toleranceMm);
+            }
+            else
+            {
+                edited = PreviewVertexEditor.DeleteVertex(
+                    verified, ringNumber - 1, vertexNumber - 1, toleranceMm);
+            }
+            // Round trip before any UI state mutation. An error leaves the
+            // original imported drawing untouched.
+            var contents = PreviewDxfExporter.Export(edited.Rings, toleranceMm);
+            var candidate = DxfReader.Parse(contents);
+            var reopened = PreviewDxfExporter.ValidateDocument(candidate, toleranceMm);
+            var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            if (!topology.IsValid || reopened.Count != edited.Rings.Count ||
+                Math.Abs(topology.NetAreaMm2 - edited.NetAreaMm2) >
+                    Math.Max(1e-6, Math.Abs(edited.NetAreaMm2) * 1e-9))
+                throw new FormatException("Изменённый контур не прошёл DXF-проверку.");
+            _dxfPreview = candidate;
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text = "DXF: редактирование прямого контура, только предпросмотр";
+            StatusText.Text = $"Контур №{ringNumber}: вершина №{vertexNumber} " +
+                (insert ? "вставлена" : "удалена") +
+                $"; чистая площадь {topology.NetAreaMm2:0.###} мм². " +
+                "Сохраните отдельно в DXF; CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Изменение вершины отклонено: " + ex.Message;
+        }
+    }
+
     private async void ExportEditedDxfClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
