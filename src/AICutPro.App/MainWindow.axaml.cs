@@ -470,6 +470,10 @@ public partial class MainWindow : Window
         Avalonia.Interactivity.RoutedEventArgs e) =>
         ApplyRigidDxfEdit("горизонтальное зеркало");
 
+    private void ScaleWholeDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyRigidDxfEdit("масштабирование");
+
     private void ApplyRigidDxfEdit(string operation)
     {
         try
@@ -514,6 +518,16 @@ public partial class MainWindow : Window
                         throw new FormatException("Неверная горизонтальная ось зеркала.");
                     edited = PreviewRigidTransformEditor.MirrorHorizontal(
                         before,axisY,toleranceMm);
+                    break;
+                case "масштабирование":
+                    if (!ParseValue(ScaleFactorBox.Text,out var factor) ||
+                        factor < 0.01 || factor > 100 ||
+                        !ParseValue(ScalePivotXBox.Text,out var scalePivotX) ||
+                        !ParseValue(ScalePivotYBox.Text,out var scalePivotY))
+                        throw new FormatException("Неверный масштаб или центр X/Y.");
+                    edited = PreviewRigidTransformEditor.ScaleUniform(
+                        before,new PreviewPoint(scalePivotX,scalePivotY),
+                        factor,toleranceMm);
                     break;
                 default:
                     throw new FormatException("Неизвестное геометрическое преобразование.");
