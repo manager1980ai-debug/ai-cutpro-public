@@ -3128,7 +3128,11 @@ if(!string.IsNullOrWhiteSpace(externalDxfDirectory))
             radii=sample.Rings.SelectMany(r=>r.Segments)
                 .OfType<PreviewArc>().Select(a=>a.RadiusMm)
                 .OrderBy(x=>x).ToArray(),
-            perimeter=sample.Rings.Sum(r=>PreviewContourMetrics.Measure(r).PerimeterMm)
+            perimeter=sample.Rings.Sum(r=>PreviewContourMetrics.Measure(r).PerimeterMm),
+            // This fixture has one outer rectangle and one verified circular hole.
+            // The external parser must independently recover that nesting.
+            expected_rings=sample.Name=="constrained_rectangle_with_hole" ? (int?)2 : null,
+            expected_holes=sample.Name=="constrained_rectangle_with_hole" ? (int?)1 : null
         });
     }
     File.WriteAllText(Path.Combine(externalDxfDirectory,"manifest.json"),
