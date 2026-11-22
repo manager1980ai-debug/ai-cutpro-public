@@ -2462,4 +2462,45 @@ Assert(!multiPierceInvalidProfile.Completed &&
        !multiPierceInvalidProfile.AllowsAutomaticResume,
        "Unconfirmed process profile cannot advance to subsequent contour attempts");
 
+// B2: a verified line-only plate can receive a symmetric 5mm corner
+// chamfer without moving or losing a circular internal hole.
+var chamferSource=Document(
+    Closed("CHAMFER_PLATE",new Point2(0,0),new Point2(100,0),
+        new Point2(100,80),new Point2(0,80)),
+    new DxfCircle("CHAMFER_HOLE",new Point2(50,40),10));
+var chamferRings=PreviewDxfExporter.ValidateDocument(chamferSource);
+var chamferOriginal=PreviewContourTopology.Analyze(chamferRings);
+var chamfered=PreviewChamferEditor.ChamferVertex(chamferRings,0,0,5);
+var chamferTopology=PreviewContourTopology.Analyze(chamfered.Rings);
+Assert(chamfered.IsValidForPreview && !chamfered.CanStartMachine &&
+       chamferTopology.IsValid && chamferTopology.Rings.Count==2 &&
+       chamfered.Rings[0].Segments.Count==5 &&
+       chamfered.Rings[1].Segments.Count==chamferRings[1].Segments.Count &&
+       Math.Abs(chamferTopology.NetAreaMm2-
+           (chamferOriginal.NetAreaMm2-12.5))<1e-6,
+       "A 5mm 90-degree chamfer cuts 12.5mm2 while preserving circular hole");
+var chamferReopened=PreviewDxfRoundTripVerifier.Verify(
+    chamfered.Rings,PreviewDxfExporter.Export(chamfered.Rings));
+Assert(PreviewContourTopology.Analyze(chamferReopened).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(chamferReopened)
+                    .NetAreaMm2-chamferTopology.NetAreaMm2)<1e-6,
+       "Chamfered geometry passes exact DXF round trip");
+foreach (var setback in new[]{-1d,0d,0.001,80d,100d,double.NaN,
+                               double.PositiveInfinity})
+{
+    bool refused=false;
+    try { PreviewChamferEditor.ChamferVertex(chamferRings,0,0,setback); }
+    catch(FormatException) { refused=true; }
+    Assert(refused,"Impossible chamfer setback must fail closed");
+}
+bool unsupportedChamferArc=false;
+try { PreviewChamferEditor.ChamferVertex(chamferRings,1,0,5); }
+catch(FormatException) { unsupportedChamferArc=true; }
+Assert(unsupportedChamferArc,
+       "Chamfer refuses circular ARC contours rather than flattening them");
+Assert(chamferRings[0].Segments.Count==4 &&
+       Math.Abs(PreviewContourTopology.Analyze(chamferRings).NetAreaMm2-
+                chamferOriginal.NetAreaMm2)<1e-6,
+       "Chamfer does not mutate original preview: Undo history can retain it");
+
 Console.WriteLine("AI CutPro core checks passed.");
