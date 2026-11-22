@@ -51,7 +51,60 @@ def _geos_faces(folder, filename):
     return faces
 
 
+def check_geos_negative_regressions():
+    """Independently reject unsafe contacts, overlaps and escaping voids.
+
+    GEOS topological predicates operate on exact polygonal LINE boundaries
+    here, not on the product's own intersections or tolerance policy.
+    """
+    from shapely.geometry import box
+
+    plate = box(0, 0, 100, 100)
+    secondary = box(150, 0, 210, 60)
+    valid_hole = box(20, 20, 30, 30)
+
+    def valid_layout(materials, voids):
+        for i, first in enumerate(materials):
+            if not first.is_valid or first.area <= 0:
+                return False
+            for second in materials[i + 1:]:
+                # Even a point/edge contact is not independent cut geometry.
+                if first.intersects(second):
+                    return False
+        for i, hole in enumerate(voids):
+            if not hole.is_valid or hole.area <= 0:
+                return False
+            # Strictly inside a single material boundary, no boundary contact.
+            owners = [part for part in materials
+                      if part.contains(hole) and part.boundary.disjoint(hole)]
+            if len(owners) != 1:
+                return False
+            for other in voids[i + 1:]:
+                if hole.intersects(other):
+                    return False
+        return True
+
+    if not valid_layout([plate, secondary], [valid_hole]):
+        raise AssertionError("GEOS safe baseline unexpectedly rejected")
+    failures = [
+        ("crossing plates", [plate, box(90, 40, 130, 80)], [valid_hole]),
+        ("edge-touching plates", [plate, box(100, 20, 120, 40)], [valid_hole]),
+        ("corner-touching plates", [plate, box(100, 100, 120, 120)], [valid_hole]),
+        ("hole escaping the plate", [plate], [box(95, 30, 110, 45)]),
+        ("hole touching the plate", [plate], [box(0, 30, 15, 45)]),
+        ("overlapping holes", [plate], [valid_hole, box(25, 25, 35, 35)]),
+        ("edge-touching holes", [plate], [valid_hole, box(30, 20, 40, 30)]),
+        ("hole without an owner", [plate], [box(130, 20, 140, 30)]),
+    ]
+    for label, materials, voids in failures:
+        if valid_layout(materials, voids):
+            raise AssertionError(f"GEOS failed to reject: {label}")
+    print(f"GEOS independent negative regressions PASS: "
+          f"{len(failures)} invalid contact/overlap/void scenarios rejected")
+
+
 def check_geos_oracle(folder):
+    check_geos_negative_regressions()
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     files = {c["file"] for c in manifest}
     if not {"constrained_rectangle_with_hole.dxf",
