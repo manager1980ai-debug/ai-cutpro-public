@@ -189,11 +189,19 @@ def probe_open_contour_layer(executable):
             time.sleep(0.25)
         if report is None:
             raise RuntimeError("Open contour diagnostic window missing")
-        texts = [x.window_text() for x in report.descendants(control_type="Text")]
-        if not any("GEO-3001" in t and "CUT_TEST" in t for t in texts):
-            raise RuntimeError("Report missing layer-specific GEO-3001 finding")
-        if not any("Слой: CUT_TEST" in t for t in texts):
-            raise RuntimeError("Confirmed layer not displayed in diagnostic details")
+        items = [x for x in report.descendants(control_type="ListItem")
+                 if "GEO-3001" in x.window_text() and "CUT_TEST" in x.window_text()]
+        if len(items) != 1:
+            raise RuntimeError("Report missing layer-specific GEO-3001 list item")
+        # Select the matching issue first; details describe the selected entry.
+        items[0].iface_selection_item.Select()
+        for _ in range(15):
+            texts = [x.window_text() for x in report.descendants(control_type="Text")]
+            if any("Слой: CUT_TEST" in t for t in texts):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Confirmed layer not displayed after selecting finding")
         if not any("Координаты проблемы: не определены" in t for t in texts):
             raise RuntimeError("Unconfirmed coordinates not explicitly marked unknown")
         report.close()
