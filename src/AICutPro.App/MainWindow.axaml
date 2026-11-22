@@ -73,6 +73,7 @@
           <TextBox x:Name="HoleCenterYBox" Text="50" Watermark="Центр Y, мм"/>
           <TextBox x:Name="HoleDiameterBox" Text="20" Watermark="Диаметр, мм"/>
           <Button Content="Изменить круглое отверстие (предпросмотр)" Click="EditCircleHoleClicked"/>
+          <Button Content="Добавить круглое отверстие (предпросмотр)" Click="AddCircleHoleClicked"/>
           <TextBlock Text="Только явный DXF CIRCLE внутри детали. Контуры, касания и вложенность проверяются; результат можно сохранить отдельно в DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Сохранить проверенные контуры DXF" Click="ExportEditedDxfClicked"/>
           <TextBlock Text="Только замкнутые LINE/ARC/CIRCLE-контуры без предупреждений. Исходный файл не перезаписывается автоматически; резка отключена." TextWrapping="Wrap" Foreground="#9CB3C9"/>
