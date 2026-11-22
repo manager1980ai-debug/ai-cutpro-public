@@ -34,6 +34,31 @@ public static class DxfDiagnosticCatalog
             "DXF text has invalid bytes or an unsupported code page.",
             "Проверьте сведения о кодировке файла. Автоматический подбор неподтверждённой кодировки запрещён, чтобы не повредить данные.",
             "Check the file's encoding declaration. Guessing an unverified encoding is disabled to protect data.", false),
+        new("GEO-3001", "Незамкнутый контур", "Open contour",
+            "Цепочка линий не образует проверенную замкнутую границу детали.",
+            "The segments do not form a verified closed part boundary.",
+            "Откройте предпросмотр и проверьте концы сегментов в указанном слое. Автоматическое соединение разрыва внутри AI CutPro ещё не реализовано.",
+            "Inspect segment endpoints in the indicated layer. Automated in-app gap repair is not yet available.", false),
+        new("GEO-3002", "Дубли или неоднозначные соединения", "Duplicate or ambiguous segments",
+            "Обнаружены повторяющиеся сегменты, ветвление или неоднозначная стыковка.",
+            "Repeated segments, branching or ambiguous joining were detected.",
+            "Проверьте совпадающие рёбра и вершины в предпросмотре. Удаление дубликатов внутри AI CutPro запланировано, но пока недоступно.",
+            "Review coincident edges and vertices in preview. In-app duplicate removal is planned but unavailable.", false),
+        new("GEO-3003", "Пересечение контуров", "Intersecting contours",
+            "Границы пересекаются, касаются или имеют самопересечение.",
+            "Boundaries intersect, touch or self-intersect.",
+            "Проверьте контуры и отверстия в предпросмотре. Не используйте чертёж для резки: исправление пересечений ещё не автоматизировано.",
+            "Inspect contours and holes in preview. Do not cut; intersection repair is not automated.", false),
+        new("GEO-3004", "Неверное положение отверстия", "Invalid hole placement",
+            "Отверстие не находится строго внутри одной детали или касается другого отверстия.",
+            "A hole is not strictly within one part or touches another hole.",
+            "Проверьте положение и размеры отверстий. Встроенные операции редактирования отдельных окружностей доступны только для проверенной геометрии.",
+            "Review hole position and dimensions. In-app circle editing works only with verified geometry.", false),
+        new("GEO-3099", "Геометрия не прошла проверку", "Geometry preflight rejected",
+            "Проверка не смогла подтвердить корректность геометрии для дальнейшей обработки.",
+            "The preflight could not establish that geometry is valid for further processing.",
+            "Изучите техническое сообщение и исходный DXF в режиме просмотра. CAM и резка остаются заблокированными.",
+            "Inspect the technical message and source DXF in preview. CAM and cutting remain blocked.", false),
         new("DXF-1099", "Ошибка чтения DXF", "DXF read error",
             "Возникла ошибка, которая пока не имеет отдельного диагностического кода.",
             "An import error does not yet have a more specific diagnostic code.",
@@ -73,6 +98,44 @@ public static class DxfDiagnosticCatalog
              message.Contains("Conflicting DXF", StringComparison.Ordinal)))
             return ByCode("DXF-1003");
         return ByCode("DXF-1099");
+    }
+
+    /// <summary>
+    /// Conservative mapping from existing geometry warnings to stable help
+    /// entries. Unrecognised warnings must never be silently treated as safe.
+    /// </summary>
+    public static DxfDiagnosticHelp ClassifyGeometry(string issue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(issue);
+        if (issue.Contains("Open chain", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Incomplete contour", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Open, degenerate", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("незамкнут", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Открытая полилиния", StringComparison.OrdinalIgnoreCase))
+            return ByCode("GEO-3001");
+        if (issue.Contains("Repeated segment", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Ambiguous endpoint", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Ambiguous continuation", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("branching segment", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Duplicate", StringComparison.OrdinalIgnoreCase))
+            return ByCode("GEO-3002");
+        if (issue.Contains("отверсти", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Окружность не находится", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Круглые отверстия", StringComparison.OrdinalIgnoreCase))
+            return ByCode("GEO-3004");
+        if (issue.Contains("intersection", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("пересека", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("касаются", StringComparison.OrdinalIgnoreCase) ||
+            issue.Contains("Самопересечение", StringComparison.OrdinalIgnoreCase))
+            return ByCode("GEO-3003");
+        return ByCode("GEO-3099");
+    }
+
+    public static string ExplainGeometryRu(string issue)
+    {
+        var help = ClassifyGeometry(issue);
+        return $"{help.Code}: {help.TitleRu}. {help.ExplanationRu} " +
+               $"Что делать: {help.AdviceRu} Технические подробности: {issue}";
     }
 
     public static string ExplainRu(Exception error)
