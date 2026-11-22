@@ -50,8 +50,7 @@ public sealed class DxfDiagnosticsWindow : Window
 
         var grid = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("300,*"),
-            ColumnSpacing = 16
+            ColumnDefinitions = new ColumnDefinitions("300,*")
         };
         var left = new StackPanel { Spacing = 8 };
         left.Children.Add(new TextBlock
@@ -64,7 +63,7 @@ public sealed class DxfDiagnosticsWindow : Window
         Grid.SetColumn(left, 0);
         grid.Children.Add(left);
 
-        var right = new ScrollViewer { Content = _details };
+        var right = new ScrollViewer { Content = _details, Margin = new Thickness(16, 0, 0, 0) };
         Grid.SetColumn(right, 1);
         grid.Children.Add(right);
 
