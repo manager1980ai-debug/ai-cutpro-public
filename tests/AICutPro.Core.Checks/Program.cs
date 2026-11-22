@@ -20,6 +20,22 @@ foreach (var entry in DxfDiagnosticCatalog.All)
            !string.IsNullOrWhiteSpace(entry.AdviceEn) &&
            !entry.RepairAvailable,
            "Every DXF diagnostic has RU/EN explanations and honest repair status");
+// End-to-end parser -> classifier: a .dxf whose LINE X coordinate is not numeric
+// must be rejected with useful diagnosis, not interpreted as a valid drawing.
+var malformedDxfFixture = "0\\nSECTION\\n2\\nENTITIES\\n0\\nLINE\\n8\\n0\\n" +
+                          "10\\nNOT_A_NUMBER\\n20\\n0\\n11\\n20\\n21\\n0\\n" +
+                          "0\\nENDSEC\\n0\\nEOF\\n";
+try
+{
+    DxfFileReader.Read(System.Text.Encoding.UTF8.GetBytes(malformedDxfFixture));
+    throw new Exception("CHECK FAILED: malformed DXF coordinates accepted");
+}
+catch (FormatException exception)
+{
+    Assert(DxfDiagnosticCatalog.Classify(exception).Code == "DXF-1003" &&
+           DxfDiagnosticCatalog.ExplainRu(exception).Contains("Что делать:", StringComparison.Ordinal),
+           "Actual malformed DXF import provides error code and correction guidance");
+}
 Assert(DxfDiagnosticCatalog.Classify(
     new FormatException("Invalid DXF number for group 10: NOT_A_NUMBER")).Code == "DXF-1003",
     "Malformed coordinate is categorised as structure error, not unknown");
