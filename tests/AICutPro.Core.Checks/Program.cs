@@ -2143,4 +2143,45 @@ Assert(restoredRigidTopology.IsValid &&
        inverseTranslate.Rings.Count==rigidPaths.Count,
        "Combined translate/rotate/mirror and their inverse preserve verified topology");
 
+// Stage 3 research-backed, strictly non-executable plasma profile checks.
+// All values here are synthetic regression fixtures, NOT cutting settings.
+var syntheticPlasmaProfile = new PlasmaProcessProfile(
+    Material: "SYNTHETIC TEST MATERIAL", ThicknessMm: 4,
+    PowerSourceModel: "TEST SOURCE", ControllerModel: "TEST CONTROLLER",
+    CutChartReference: "SYNTHETIC TEST CHART ONLY",
+    CurrentAmps: 20, FeedRateMmPerMinute: 1000, KerfWidthMm: 1,
+    PierceDelaySeconds: 0.5, PierceHeightMm: 3, CutHeightMm: 1,
+    OperatorConfirmed: true, RequiresArcOk: true, ArcOkSupported: true,
+    ThcRequested: false, ThcSupported: false, ZMotionSupported: true);
+Assert(syntheticPlasmaProfile.ValidateForPlanning().Count == 0 &&
+       !syntheticPlasmaProfile.CanStartMachine,
+       "Structurally coherent synthetic plasma profile remains non-executable");
+Assert(syntheticPlasmaProfile with { PierceDelaySeconds = 0 }
+       is { CanStartMachine: false },
+       "Zero delay is a representable documented value, never machine approval");
+Assert((syntheticPlasmaProfile with { PierceDelaySeconds = -1 })
+           .ValidateForPlanning().Any(x=>x.Contains("Pierce delay")) &&
+       (syntheticPlasmaProfile with { PierceDelaySeconds = double.NaN })
+           .ValidateForPlanning().Any(x=>x.Contains("Pierce delay")) &&
+       (syntheticPlasmaProfile with { PierceDelaySeconds = double.PositiveInfinity })
+           .ValidateForPlanning().Any(x=>x.Contains("Pierce delay")),
+       "Negative and nonfinite pierce timing must fail planning checks");
+Assert((syntheticPlasmaProfile with { PierceHeightMm = 0.5 })
+           .ValidateForPlanning().Any(x=>x.Contains("exceed cut height")) &&
+       (syntheticPlasmaProfile with { ZMotionSupported = false })
+           .ValidateForPlanning().Any(x=>x.Contains("Z motion")),
+       "Unsupported Z configuration or inverted pierce/cut heights fail closed");
+Assert((syntheticPlasmaProfile with { RequiresArcOk = true, ArcOkSupported = false })
+           .ValidateForPlanning().Any(x=>x.Contains("Arc OK")) &&
+       (syntheticPlasmaProfile with { ThcRequested = true, ThcSupported = false })
+           .ValidateForPlanning().Any(x=>x.Contains("THC")),
+       "Requested hardware feedback cannot be assumed present");
+Assert((syntheticPlasmaProfile with { CutChartReference = "" })
+           .ValidateForPlanning().Any(x=>x.Contains("cut-chart")) &&
+       (syntheticPlasmaProfile with { OperatorConfirmed = false })
+           .ValidateForPlanning().Any(x=>x.Contains("Operator")) &&
+       (syntheticPlasmaProfile with { KerfWidthMm = -0.01 })
+           .ValidateForPlanning().Any(x=>x.Contains("Kerf")),
+       "Unreferenced, unconfirmed and invalid profiles cannot pass planning validation");
+
 Console.WriteLine("AI CutPro core checks passed.");
