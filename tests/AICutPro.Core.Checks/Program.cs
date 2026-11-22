@@ -151,9 +151,11 @@ var unclosedSection = DxfReader.Parse(string.Join("\n", new[]
 Assert(unclosedSection.Shapes.Count == 1 &&
        unclosedSection.Warnings.Any(w=>w.Contains("unterminated or malformed SECTION")),
        "Truncated ENTITIES section remains diagnostic-only with a blocking warning");
-Assert(!GeometryPreflight.Inspect(unclosedSection,new Sheet(100,100))
-           .CanGenerateMachineCommands,
-       "Unclosed DXF never generates machine commands");
+var unclosedPreflight = GeometryPreflight.Inspect(unclosedSection,new Sheet(100,100));
+Assert(unclosedPreflight.Status == GeometryPreflightStatus.Rejected &&
+       unclosedPreflight.BlockingIssues.Any(issue => issue.Contains("unterminated")) &&
+       !unclosedPreflight.CanGenerateMachineCommands,
+       "Incomplete DXF must be rejected by preflight with an explicit reason");
 bool unclosedExportBlocked=false;
 try { PreviewDxfExporter.ValidateDocument(unclosedSection); }
 catch (FormatException) {unclosedExportBlocked=true;}
