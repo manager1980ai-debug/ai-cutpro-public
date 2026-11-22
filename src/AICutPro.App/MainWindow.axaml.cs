@@ -753,6 +753,55 @@ public partial class MainWindow : Window
         }
     }
 
+    private void FilletLineArcClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var segmentNumber) ||
+                ringNumber<1 || segmentNumber<1)
+                throw new FormatException("Номера контура и ARC-сегмента должны быть положительными.");
+            if (!(double.TryParse(LineArcFilletRadiusBox.Text,NumberStyles.Float,
+                    CultureInfo.CurrentCulture,out var radius) ||
+                  double.TryParse(LineArcFilletRadiusBox.Text,NumberStyles.Float,
+                    CultureInfo.InvariantCulture,out radius)) ||
+                !double.IsFinite(radius))
+                throw new FormatException("Неверный радиус LINE/ARC сопряжения.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var edited=PreviewLineArcFilletEditor.FilletIncomingLine(
+                before,ringNumber-1,segmentNumber-1,radius,toleranceMm);
+            var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
+            var imported=DxfReader.Parse(serialized);
+            if (imported.Warnings.Count>0)
+                throw new FormatException("DXF содержит неподдерживаемые данные.");
+            var reopened=PreviewDxfRoundTripVerifier.Verify(
+                edited.Rings,serialized,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            if(!topology.IsValid||reopened.Count!=edited.Rings.Count)
+                throw new FormatException("LINE/ARC сопряжение не прошло проверку.");
+            CommitDxfPreview(imported);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: точное касательное LINE/ARC сопряжение";
+            StatusText.Text=$"LINE/ARC: контур №{ringNumber}, ARC №{segmentNumber}, "+
+                $"R {radius:0.###} мм; площадь {topology.NetAreaMm2:0.###} мм². "+
+                "Undo/Redo доступны. CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="LINE/ARC сопряжение отклонено: "+ex.Message;
+        }
+    }
+
     // Numbered segment and vertex editing is deliberately restricted to
     // fully verified, closed straight-line rings. Nothing is sent to a machine.
     private void InsertDxfVertexClicked(object? sender,
