@@ -25,6 +25,57 @@ def _endpoints(entity):
     return at(entity.dxf.start_angle), at(entity.dxf.end_angle)
 
 
+def _cross(a, b):
+    return a[0] * b[1] - a[1] * b[0]
+
+
+def _subtract(a, b):
+    return (a[0] - b[0], a[1] - b[1])
+
+
+def check_line_intersections(entities, tolerance=1e-7):
+    """Reject non-endpoint LINE/LINE intersections and collinear overlap.
+
+    Exact curved intersections remain a separate B3 task. Touching shared
+    endpoints is allowed, because neighboring contour edges must join.
+    """
+    lines = [_endpoints(entity) for entity in entities
+             if entity.dxftype() == "LINE"]
+    for i, (a, b) in enumerate(lines):
+        r = _subtract(b, a)
+        rr = r[0] * r[0] + r[1] * r[1]
+        if rr <= tolerance * tolerance:
+            raise AssertionError("Degenerate DXF LINE")
+        for c, d in lines[i + 1:]:
+            v = _subtract(d, c)
+            vv = v[0] * v[0] + v[1] * v[1]
+            if vv <= tolerance * tolerance:
+                raise AssertionError("Degenerate DXF LINE")
+            w = _subtract(c, a)
+            denominator = _cross(r, v)
+            scale = math.sqrt(rr * vv)
+            if abs(denominator) <= tolerance * scale:
+                # Parallel: check collinearity using perpendicular distance.
+                if abs(_cross(w, r)) > tolerance * math.sqrt(rr):
+                    continue
+                t0 = (w[0] * r[0] + w[1] * r[1]) / rr
+                other = _subtract(d, a)
+                t1 = (other[0] * r[0] + other[1] * r[1]) / rr
+                overlap = min(1.0, max(t0, t1)) - max(0.0, min(t0, t1))
+                if overlap * math.sqrt(rr) > tolerance:
+                    raise AssertionError("Overlapping collinear DXF LINE edges")
+                continue
+            t = _cross(w, v) / denominator
+            u = _cross(w, r) / denominator
+            t_eps = tolerance / math.sqrt(rr)
+            u_eps = tolerance / math.sqrt(vv)
+            if -t_eps <= t <= 1 + t_eps and -u_eps <= u <= 1 + u_eps:
+                at_a_endpoint = abs(t) <= t_eps or abs(t - 1) <= t_eps
+                at_c_endpoint = abs(u) <= u_eps or abs(u - 1) <= u_eps
+                if not (at_a_endpoint and at_c_endpoint):
+                    raise AssertionError("Non-endpoint DXF LINE intersection")
+
+
 def check_closed_contour_graph(entities, tolerance=1e-5):
     """Every exported LINE/ARC endpoint must have exactly two incident edges.
 
@@ -103,6 +154,28 @@ def run_negative_graph_regressions():
         pass
     else:
         raise AssertionError("Negative regression: branching graph accepted")
+    crossing = ezdxf.new().modelspace()
+    crossing.add_line((0, 0), (10, 10))
+    crossing.add_line((0, 10), (10, 0))
+    try:
+        check_line_intersections(list(crossing))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative regression: crossed LINE edges accepted")
+    overlap = ezdxf.new().modelspace()
+    overlap.add_line((0, 0), (10, 0))
+    overlap.add_line((5, 0), (15, 0))
+    try:
+        check_line_intersections(list(overlap))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("Negative regression: overlapped LINE edges accepted")
+    touching = ezdxf.new().modelspace()
+    touching.add_line((0, 0), (10, 0))
+    touching.add_line((10, 0), (10, 10))
+    check_line_intersections(list(touching))
 
 
 def check_sample(root: pathlib.Path, case: dict) -> None:
@@ -126,6 +199,7 @@ def check_sample(root: pathlib.Path, case: dict) -> None:
         )
 
     vertex_count, edge_count = check_closed_contour_graph(entities)
+    check_line_intersections(entities)
     radii = []
     perimeter = 0.0
     for entity in entities:
