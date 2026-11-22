@@ -62,6 +62,7 @@ public static class PreviewDxfRoundTripVerifier
                     Near(sourceBounds.MinY, bounds.MinY, toleranceMm) &&
                     Near(sourceBounds.MaxX, bounds.MaxX, toleranceMm) &&
                     Near(sourceBounds.MaxY, bounds.MaxY, toleranceMm) &&
+                    SameBoundary(source, candidate, toleranceMm) &&
                     before.Rings[i].Depth == after.Rings[j].Depth &&
                     before.Rings[i].IsMaterialBoundary == after.Rings[j].IsMaterialBoundary)
                     matches.Add(j);
@@ -80,6 +81,66 @@ public static class PreviewDxfRoundTripVerifier
                 throw new FormatException("DXF round trip changed hole or island ownership.");
         }
         return reopened;
+    }
+
+    // The analytic boundary must be identical, not merely equal in area,
+    // perimeter and bounding box. DXF may reorder/reverse the same segments.
+    private static bool SameBoundary(
+        PreviewPath source, PreviewPath candidate, double toleranceMm)
+    {
+        if (source.Segments.Count != candidate.Segments.Count) return false;
+        var matched = new bool[candidate.Segments.Count];
+        foreach (var sourceSegment in source.Segments)
+        {
+            var match = -1;
+            for (int j = 0; j < candidate.Segments.Count; j++)
+                if (!matched[j] && SameSegment(sourceSegment,
+                        candidate.Segments[j], toleranceMm))
+                {
+                    match = j;
+                    break;
+                }
+            if (match < 0) return false;
+            matched[match] = true;
+        }
+        return true;
+    }
+
+    private static bool SameSegment(
+        PreviewSegment a, PreviewSegment b, double toleranceMm)
+    {
+        var coordinateTolerance = Math.Max(1e-8, toleranceMm * 1e-4);
+        bool PointNear(PreviewPoint p, PreviewPoint q) =>
+            Near(p.X,q.X,coordinateTolerance) &&
+            Near(p.Y,q.Y,coordinateTolerance);
+        if (a is PreviewLine left && b is PreviewLine right)
+            return (PointNear(left.Start,right.Start) &&
+                    PointNear(left.End,right.End)) ||
+                   (PointNear(left.Start,right.End) &&
+                    PointNear(left.End,right.Start));
+        if (a is PreviewArc first && b is PreviewArc second)
+        {
+            if (!PointNear(first.Center,second.Center) ||
+                !Near(first.RadiusMm,second.RadiusMm,coordinateTolerance) ||
+                !Near(Math.Abs(first.SweepDegrees),
+                      Math.Abs(second.SweepDegrees),1e-8))
+                return false;
+            static PreviewPoint Point(PreviewArc arc, double angle)
+            {
+                var r=angle*Math.PI/180;
+                return new(arc.Center.X+arc.RadiusMm*Math.Cos(r),
+                           arc.Center.Y+arc.RadiusMm*Math.Sin(r));
+            }
+            var firstStart=Point(first,first.StartDegrees);
+            var firstEnd=Point(first,first.StartDegrees+first.SweepDegrees);
+            var secondStart=Point(second,second.StartDegrees);
+            var secondEnd=Point(second,second.StartDegrees+second.SweepDegrees);
+            return (Math.Sign(first.SweepDegrees)==Math.Sign(second.SweepDegrees) &&
+                    PointNear(firstStart,secondStart) && PointNear(firstEnd,secondEnd)) ||
+                   (Math.Sign(first.SweepDegrees)!=Math.Sign(second.SweepDegrees) &&
+                    PointNear(firstStart,secondEnd) && PointNear(firstEnd,secondStart));
+        }
+        return false;
     }
 
     private static bool Near(double left, double right, double absoluteTolerance)
