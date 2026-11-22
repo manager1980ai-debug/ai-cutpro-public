@@ -12,6 +12,12 @@ from pywinauto import Desktop
 
 
 def main() -> None:
+    # GitHub-hosted Windows consoles can default to a legacy codepage; the
+    # Russian title is valid UI data and must not make logging fail.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     executable = pathlib.Path(sys.argv[1]).resolve()
     screenshot = pathlib.Path(sys.argv[2]).resolve()
     if not executable.is_file():
