@@ -2938,4 +2938,44 @@ Assert(Math.Abs(((PreviewLine)pinnedSource[0].Segments[0]).End.X-
                  oldHorizontalLength)<1e-7,
        "Projection never mutates the source Undo snapshot");
 
+// B2: propagation through the actual graph of retained axis constraints.
+// Moving bottom right of the rectangle drives bottom left's Y and top
+// right's X while leaving the unrelated top left vertex untouched.
+var propagated=PreviewAxisPropagationEditor.MoveConnectedVertices(
+    constrainedRectangle,0,1,new PreviewPoint(110,10),twoAxisRules);
+var propagatedLines=propagated.Rings[0].Segments.Cast<PreviewLine>().ToArray();
+var propagatedPoints=propagatedLines.Select(x=>x.Start).ToArray();
+Assert(propagated.IsValidForPreview && !propagated.CanStartMachine &&
+       Math.Abs(propagatedPoints[0].X-0)<1e-7 &&
+       Math.Abs(propagatedPoints[0].Y-10)<1e-7 &&
+       Math.Abs(propagatedPoints[1].X-110)<1e-7 &&
+       Math.Abs(propagatedPoints[1].Y-10)<1e-7 &&
+       Math.Abs(propagatedPoints[2].X-110)<1e-7 &&
+       Math.Abs(propagatedPoints[2].Y-100)<1e-7 &&
+       Math.Abs(propagatedPoints[3].X-0)<1e-7 &&
+       Math.Abs(propagatedPoints[3].Y-100)<1e-7 &&
+       PreviewContourTopology.Analyze(propagated.Rings).IsValid,
+       "Axis propagation moves multiple vertices only along pinned coordinate graphs");
+PreviewPersistentAxisConstraints.RequireCompatibleEdit(
+    constrainedRectangle,propagated.Rings,twoAxisRules);
+PreviewDxfRoundTripVerifier.Verify(propagated.Rings,
+    PreviewDxfExporter.Export(propagated.Rings));
+var propagatedWithHole=PreviewAxisPropagationEditor.MoveConnectedVertices(
+    new PreviewPath[]{constrainedRectangle[0],horizontalRings[1]},
+    0,1,new PreviewPoint(110,10),twoAxisRules);
+Assert(PreviewContourTopology.Analyze(propagatedWithHole.Rings).IsValid &&
+       propagatedWithHole.Rings[1].Segments.Count==
+           horizontalRings[1].Segments.Count,
+       "Multi-vertex propagation preserves separate circular hole");
+bool rejectedCollapsedGraph=false;
+try {
+    PreviewAxisPropagationEditor.MoveConnectedVertices(
+        constrainedRectangle,0,1,new PreviewPoint(0,0),twoAxisRules);
+} catch(FormatException) {rejectedCollapsedGraph=true;}
+Assert(rejectedCollapsedGraph,
+       "Graph propagation rejects zero-width contour without modifying source");
+Assert(Math.Abs(((PreviewLine)constrainedRectangle[0].Segments[0]).End.X-100)<1e-7 &&
+       Math.Abs(((PreviewLine)constrainedRectangle[0].Segments[0]).End.Y)<1e-7,
+       "Multi-vertex solver leaves original snapshot unchanged");
+
 Console.WriteLine("AI CutPro core checks passed.");
