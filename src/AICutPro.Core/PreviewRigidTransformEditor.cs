@@ -48,6 +48,17 @@ public static class PreviewRigidTransformEditor
             a => (180-a.StartDegrees,-a.SweepDegrees), toleranceMm);
     }
 
+    /// <summary>Reflect around the infinite horizontal line y = axisYmm.</summary>
+    public static PreviewVertexEditResult MirrorHorizontal(
+        IReadOnlyList<PreviewPath> rings, double axisYmm,
+        double toleranceMm = 0.01)
+    {
+        if (!double.IsFinite(axisYmm) || Math.Abs(axisYmm)>1_000_000)
+            throw new FormatException("Invalid mirror axis.");
+        return Apply(rings, p => new(p.X,2*axisYmm - p.Y),
+            a => (-a.StartDegrees,-a.SweepDegrees), toleranceMm);
+    }
+
     private static PreviewVertexEditResult Apply(
         IReadOnlyList<PreviewPath> rings,
         Func<PreviewPoint,PreviewPoint> point,
