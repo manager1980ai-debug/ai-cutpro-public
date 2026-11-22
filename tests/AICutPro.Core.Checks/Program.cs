@@ -216,6 +216,23 @@ catch (FormatException) { trailingExportBlocked = true; }
 Assert(trailingExportBlocked,
        "DXF with data after EOF cannot pass verified export");
 
+// B1: unknown LWPOLYLINE flags must not be masked into a safe closed ring.
+var unsupportedPolylineFlags = DxfReader.Parse(SafeEntityDxf(
+    "0","LWPOLYLINE","90","4","70","129",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10"));
+Assert(unsupportedPolylineFlags.Shapes.Count == 0 &&
+       unsupportedPolylineFlags.Warnings.Any(w => w.Contains("Unsupported LWPOLYLINE flags")),
+       "Unsupported LWPOLYLINE flags must skip the complete entity");
+var supportedPolylineFlag = DxfReader.Parse(SafeEntityDxf(
+    "0","LWPOLYLINE","90","4","70","1",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10"));
+Assert(supportedPolylineFlag.Shapes.Count == 1 &&
+       supportedPolylineFlag.Shapes[0] is DxfPolyline { Closed: true } &&
+       supportedPolylineFlag.Warnings.Count == 0,
+       "Supported closed LWPOLYLINE remains readable after stricter flag parsing");
+
 var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
 Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
 var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
