@@ -702,6 +702,57 @@ public partial class MainWindow : Window
         }
     }
 
+    private void FilletDxfVertexClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Неверный допуск DXF.");
+            if (!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var vertexNumber) ||
+                ringNumber<1 || vertexNumber<1)
+                throw new FormatException("Номера контура и вершины должны быть положительными.");
+            if (!(double.TryParse(FilletRadiusBox.Text,NumberStyles.Float,
+                    CultureInfo.CurrentCulture,out var radius) ||
+                  double.TryParse(FilletRadiusBox.Text,NumberStyles.Float,
+                    CultureInfo.InvariantCulture,out radius)) ||
+                !double.IsFinite(radius))
+                throw new FormatException("Неверный радиус скругления.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var edited=PreviewCornerFilletEditor.FilletVertex(
+                before,ringNumber-1,vertexNumber-1,radius,toleranceMm);
+            var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
+            var imported=DxfReader.Parse(serialized);
+            if (imported.Warnings.Count>0)
+                throw new FormatException("DXF после скругления содержит предупреждения.");
+            var reopened=PreviewDxfRoundTripVerifier.Verify(
+                edited.Rings,serialized,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            if (!topology.IsValid || reopened.Count!=edited.Rings.Count ||
+                Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
+                    Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
+                throw new FormatException("Скругление не прошло повторную проверку DXF.");
+            CommitDxfPreview(imported);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: точное скругление ARC, только предпросмотр";
+            StatusText.Text=$"Скругление: контур №{ringNumber}, вершина №{vertexNumber}, "+
+                $"R {radius:0.###} мм; площадь {topology.NetAreaMm2:0.###} мм². "+
+                "Undo/Redo доступны, CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Скругление угла отклонено: "+ex.Message;
+        }
+    }
+
     // Numbered segment and vertex editing is deliberately restricted to
     // fully verified, closed straight-line rings. Nothing is sent to a machine.
     private void InsertDxfVertexClicked(object? sender,
