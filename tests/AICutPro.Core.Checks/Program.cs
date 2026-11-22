@@ -57,6 +57,23 @@ Assert(DxfDiagnosticCatalog.ExplainRu(
     new FormatException("Truncated DXF pair")).Contains("Что делать:",StringComparison.Ordinal),
     "Import diagnostic includes actionable advice in Russian");
 
+// B1.1: a layer marker can only be trusted when that layer exists in the
+// imported drawing. A generic error must never acquire guessed coordinates.
+var sampleLocationShapes = new DxfShape[]
+{
+    new DxfLine("PLASMA CUT:OUTER", new Point2(0, 0), new Point2(10, 0)),
+    new DxfLine("OTHER", new Point2(0, 1), new Point2(10, 1))
+};
+Assert(DxfDiagnosticCatalog.KnownIssueLayer(
+    "Layer PLASMA CUT:OUTER: Open chain or branching segment graph.",
+    sampleLocationShapes) == "PLASMA CUT:OUTER", "Layer name with colon is preserved");
+Assert(DxfDiagnosticCatalog.KnownIssueLayer(
+    "Layer MISSING: Open chain or branching segment graph.",
+    sampleLocationShapes) is null, "Unverified DXF layer not accepted as location");
+Assert(DxfDiagnosticCatalog.KnownIssueLayer(
+    "Contours 1 and 2: intersection.", sampleLocationShapes) is null,
+    "Global geometry warning does not invent an object layer");
+
 // B1.1 geometry guidance: classify only observed warning kinds, keep
 // unknown warnings blocked, and never advertise an unavailable repair.
 var geometryCases = new (string Issue, string Code)[]
