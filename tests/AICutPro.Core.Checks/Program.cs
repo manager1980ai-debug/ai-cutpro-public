@@ -3174,6 +3174,31 @@ foreach(var invalidIntersection in new[]{
     Assert(rejected,"Unsafe analytic intersection tolerance rejected");
 }
 
+// Coincident circular sectors cross the 360-degree seam with a deliberately
+// short overlapping ARC interval, shorter than 0.01 degree. The two sectors
+// also meet at their centers; check the *overlap* diagnostic specifically.
+static PreviewPath TestSector(double startDegrees,double sweepDegrees)
+{
+    var center = new PreviewPoint(0,0);
+    static PreviewPoint At(double deg) =>
+        new(Math.Cos(deg*Math.PI/180),Math.Sin(deg*Math.PI/180));
+    return new PreviewPath([
+        new PreviewArc(center,1,startDegrees,sweepDegrees),
+        new PreviewLine(At(startDegrees+sweepDegrees),center),
+        new PreviewLine(center,At(startDegrees))
+    ],true);
+}
+var seamSector = TestSector(350,20);
+var shortOverlapSector = TestSector(9.999,20);
+var disjointSector = TestSector(10.001,20);
+var seamOverlap = preciseIntersections.ValidatePair(seamSector,shortOverlapSector);
+var seamDisjoint = preciseIntersections.ValidatePair(seamSector,disjointSector);
+Assert(seamOverlap.Any(x=>x.Contains("Ambiguous coincident or overlapping",StringComparison.Ordinal)),
+       "Short ARC overlap across 360-degree seam must be detected");
+Assert(!seamDisjoint.Any(x=>x.Contains("Ambiguous coincident or overlapping",StringComparison.Ordinal)),
+       "Nonoverlapping ARC sweeps must not be mistaken for coincident arcs");
+
+
 
 
 // Optional independent-parser fixture export for CI. All source data
