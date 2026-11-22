@@ -454,6 +454,84 @@ public partial class MainWindow : Window
         _dxfPreview = _dxfHistory.Current;
     }
 
+    private void TranslateWholeDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyRigidDxfEdit("перенос");
+
+    private void RotateWholeDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyRigidDxfEdit("поворот");
+
+    private void MirrorWholeDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e) =>
+        ApplyRigidDxfEdit("зеркало");
+
+    private void ApplyRigidDxfEdit(string operation)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF или создайте 2D-эскиз.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text, out var toleranceMm))
+                throw new FormatException("Неверный геометрический допуск.");
+            static bool ParseValue(string? value, out double result) =>
+                (double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out result) ||
+                 double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result)) &&
+                double.IsFinite(result) && Math.Abs(result) <= 1_000_000;
+
+            var before = PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            PreviewVertexEditResult edited;
+            switch (operation)
+            {
+                case "перенос":
+                    if (!ParseValue(ExportMoveXBox.Text,out var dx) ||
+                        !ParseValue(ExportMoveYBox.Text,out var dy))
+                        throw new FormatException("Неверные значения переноса X/Y.");
+                    edited = PreviewRigidTransformEditor.Translate(before,dx,dy,toleranceMm);
+                    break;
+                case "поворот":
+                    if (!ParseValue(ExportRotationBox.Text,out var angle) ||
+                        Math.Abs(angle)>360_000)
+                        throw new FormatException("Неверный угол поворота.");
+                    edited = PreviewRigidTransformEditor.Rotate(
+                        before,new PreviewPoint(0,0),angle,toleranceMm);
+                    break;
+                case "зеркало":
+                    if (!ParseValue(MirrorAxisXBox.Text,out var axisX))
+                        throw new FormatException("Неверная вертикальная ось зеркала.");
+                    edited = PreviewRigidTransformEditor.MirrorVertical(
+                        before,axisX,toleranceMm);
+                    break;
+                default:
+                    throw new FormatException("Неизвестное геометрическое преобразование.");
+            }
+            var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
+            var imported=DxfReader.Parse(serialized);
+            if (imported.Warnings.Count>0)
+                throw new FormatException("Повторно импортированный DXF содержит предупреждения.");
+            var reopened=PreviewDxfRoundTripVerifier.Verify(
+                edited.Rings,serialized,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            if (!topology.IsValid || reopened.Count!=edited.Rings.Count ||
+                Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
+                    Math.Max(1e-6,edited.NetAreaMm2*1e-9))
+                throw new FormatException("Преобразование не прошло повторную проверку DXF.");
+            CommitDxfPreview(imported);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: "+operation+" всех контуров, только предпросмотр";
+            StatusText.Text=$"Преобразование «{operation}» применено. " +
+                $"Контуров: {reopened.Count}; площадь {topology.NetAreaMm2:0.###} мм². " +
+                "Доступны Undo/Redo и сохранение DXF. CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Преобразование DXF отклонено: "+ex.Message;
+        }
+    }
+
     private void UndoDxfClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
