@@ -492,7 +492,8 @@ public partial class MainWindow : Window
                 .Distinct(StringComparer.Ordinal).ToArray();
             _dxfDiagnostics = geometryIssues
                 .Select(issue => new DxfDiagnosticFinding(
-                    DxfDiagnosticCatalog.ClassifyGeometry(issue), issue)).ToArray();
+                    DxfDiagnosticCatalog.ClassifyGeometry(issue), issue,
+                    DxfDiagnosticCatalog.KnownIssueLayer(issue, imported.Shapes))).ToArray();
             if (geometryIssues.Length > 0)
             {
                 StatusText.Text += " Диагностика: " +
