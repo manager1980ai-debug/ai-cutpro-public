@@ -1524,4 +1524,48 @@ Assert(editedArcScad.OpenScad.Contains("r = 15") &&
        Math.Abs(editedArcScad.VolumeMm3-(20000-Math.PI*225)*5)<1e-6,
        "Four-ARC changed geometry reaches synchronized 3D assembly");
 
+// Stage 2: change one analytical ARC radius while locking chord endpoints.
+var semicircleArcSet = PreviewArcRadiusEditor.SetRadius([safeSemicircle],0,0,12);
+var modifiedArc = (PreviewArc)semicircleArcSet.Rings[0].Segments[0];
+var beforeArcArea=PreviewContourMetrics.Measure(safeSemicircle).AreaMm2;
+Assert(semicircleArcSet.IsValidForPreview &&
+       !semicircleArcSet.CanStartMachine &&
+       Math.Abs(modifiedArc.RadiusMm-12)<1e-9 &&
+       Math.Abs(modifiedArc.SweepDegrees)<180 &&
+       semicircleArcSet.NetAreaMm2<beforeArcArea,
+       "Radius edit preserves chord endpoints and decreases semicircular cap area");
+var radiusDxf=PreviewDxfExporter.Export(semicircleArcSet.Rings);
+var radiusRoundtrip=PreviewDxfRoundTripVerifier.Verify(
+    semicircleArcSet.Rings,radiusDxf);
+Assert(radiusRoundtrip[0].Segments.OfType<PreviewArc>()
+           .Any(a=>Math.Abs(a.RadiusMm-12)<1e-8),
+       "Edited ARC radius survives exact DXF export/import");
+static bool RejectArcRadius(IReadOnlyList<PreviewPath> rings,int ring,int segment,double radius)
+{
+    try { PreviewArcRadiusEditor.SetRadius(rings,ring,segment,radius);return false; }
+    catch(FormatException) {return true;}
+}
+Assert(RejectArcRadius([safeSemicircle],0,0,9) &&
+       RejectArcRadius([safeSemicircle],0,0,0) &&
+       RejectArcRadius([safeSemicircle],0,0,double.NaN) &&
+       RejectArcRadius([safeSemicircle],0,0,double.PositiveInfinity) &&
+       RejectArcRadius([safeSemicircle],0,1,12) &&
+       RejectArcRadius([safeSemicircle],4,0,12),
+       "ARC radius editing rejects impossible radii, nonfinite data and LINE segments");
+var nestedHalfDisc = new PreviewPath([
+    new PreviewArc(new(50,50),10,0,180),
+    new PreviewLine(new(40,50),new(60,50))],true);
+var rectContainingArc = new PreviewPath([
+    new PreviewLine(new(0,0),new(100,0)),
+    new PreviewLine(new(100,0),new(100,100)),
+    new PreviewLine(new(100,100),new(0,100)),
+    new PreviewLine(new(0,100),new(0,0))],true);
+var nestedArcSet=PreviewArcRadiusEditor.SetRadius(
+    [rectContainingArc,nestedHalfDisc],1,0,12);
+Assert(PreviewContourTopology.Analyze(nestedArcSet.Rings).IsValid &&
+       nestedArcSet.Rings.Count==2,
+       "Nested analytic ARC edit retains hole identity");
+Assert(RejectArcRadius([rectContainingArc,nestedHalfDisc],1,0,100),
+       "ARC radius edit rejects topology collapse and outer-boundary crossing");
+
 Console.WriteLine("AI CutPro core checks passed.");
