@@ -95,6 +95,10 @@
           <TextBlock Text="Абсолютный угол прямого ребра относительно +X, °" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditEdgeAngleBox" Text="0" Watermark="Угол, градусы (-360…360)"/>
           <Button Content="Задать угол ребра (предпросмотр)" Click="SetDxfEdgeAngleClicked"/>
+          <TextBlock Text="Геометрическое ограничение прямого ребра" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <Button Content="Выровнять ребро горизонтально" Click="ConstrainEdgeHorizontalClicked"/>
+          <Button Content="Выровнять ребро вертикально" Click="ConstrainEdgeVerticalClicked"/>
+          <TextBlock Text="Однократная фиксация направления: начальная вершина и длина ребра сохраняются. Номер ребра выше; только LINE-контуры. Это пока не постоянная параметрическая зависимость." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Радиус выбранной дуги ARC, мм (концы дуги закреплены)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
           <TextBox x:Name="EditArcRadiusBox" Text="12" Watermark="Новый радиус, мм"/>
           <Button Content="Изменить радиус дуги (предпросмотр)" Click="EditSingleArcRadiusClicked"/>
