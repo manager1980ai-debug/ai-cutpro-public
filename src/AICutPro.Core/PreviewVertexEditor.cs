@@ -222,6 +222,57 @@ public static class PreviewVertexEditor
         return edited;
     }
 
+    /// <summary>
+    /// Sets the absolute world XY bearing of a straight edge, measured
+    /// counterclockwise in degrees from the positive X axis. Keeps the edge
+    /// start and existing length fixed, and moves only its end vertex.
+    /// Moving that vertex also updates the next edge; all other rings are
+    /// validated again, including hole/island ownership. Preview-only.
+    /// </summary>
+    public static PreviewVertexEditResult SetEdgeAngle(
+        IReadOnlyList<PreviewPath> rings, int ringIndex, int segmentIndex,
+        double angleDegrees, double toleranceMm = 0.01)
+    {
+        ArgumentNullException.ThrowIfNull(rings);
+        if (!double.IsFinite(toleranceMm) ||
+            toleranceMm < 0.0001 || toleranceMm > 1)
+            throw new ArgumentOutOfRangeException(nameof(toleranceMm));
+        if (!double.IsFinite(angleDegrees) || Math.Abs(angleDegrees) > 360)
+            throw new FormatException("Invalid edge angle; expected -360 to 360 degrees.");
+        if (rings.Count is < 1 or > 1000 ||
+            ringIndex < 0 || ringIndex >= rings.Count)
+            throw new FormatException("Invalid ring index.");
+        var ring = rings[ringIndex];
+        if (!ring.Closed || ring.Segments.Count is < 3 or > 2000 ||
+            ring.Segments.Any(segment => segment is not PreviewLine))
+            throw new FormatException("Angle editing requires a closed line-only ring.");
+        if (segmentIndex < 0 || segmentIndex >= ring.Segments.Count)
+            throw new FormatException("Invalid edge index.");
+        var edge = (PreviewLine)ring.Segments[segmentIndex];
+        var length = Distance(edge.Start, edge.End);
+        if (!double.IsFinite(length) || length <= toleranceMm)
+            throw new FormatException("Original edge is degenerate.");
+        var radians = angleDegrees * Math.PI / 180;
+        var newEnd = new PreviewPoint(
+            edge.Start.X + length * Math.Cos(radians),
+            edge.Start.Y + length * Math.Sin(radians));
+        var edited = MoveVertex(rings, ringIndex,
+            (segmentIndex + 1) % ring.Segments.Count, newEnd, toleranceMm);
+        var changedEdge = (PreviewLine)edited.Rings[ringIndex].Segments[segmentIndex];
+        var actualLength = Distance(changedEdge.Start, changedEdge.End);
+        if (Math.Abs(actualLength - length) >
+            Math.Max(1e-7, length * 1e-10))
+            throw new FormatException("Angle edit unexpectedly changed edge length.");
+        var actualRadians = Math.Atan2(
+            changedEdge.End.Y - changedEdge.Start.Y,
+            changedEdge.End.X - changedEdge.Start.X);
+        var error = Math.Atan2(Math.Sin(actualRadians - radians),
+                               Math.Cos(actualRadians - radians));
+        if (Math.Abs(error) > 1e-8)
+            throw new FormatException("Edited edge does not have the requested angle.");
+        return edited;
+    }
+
     // Valid rings are not enough: changing a hole into an independent part,
     // or silently changing a material island into a void, is a drafting error.
     // Preserve the original ring ownership and parity across vertex edits.
