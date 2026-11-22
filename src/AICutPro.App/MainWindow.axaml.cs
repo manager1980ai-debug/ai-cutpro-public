@@ -669,6 +669,53 @@ public partial class MainWindow : Window
         }
     }
 
+    private void EditSingleArcRadiusClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is null)
+                throw new FormatException("Сначала откройте DXF.");
+            if (!TryParseGeometryTolerance(DxfToleranceBox.Text,out var toleranceMm))
+                throw new FormatException("Укажите допустимый геометрический допуск.");
+            if (!int.TryParse(EditRingIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var ringNumber) ||
+                !int.TryParse(EditVertexIndexBox.Text,NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,out var segmentNumber) ||
+                ringNumber<1 || segmentNumber<1)
+                throw new FormatException("Номера контура и ARC-сегмента должны быть положительными.");
+            if (!(double.TryParse(EditArcRadiusBox.Text,NumberStyles.Float,
+                    CultureInfo.CurrentCulture,out var radiusMm) ||
+                  double.TryParse(EditArcRadiusBox.Text,NumberStyles.Float,
+                    CultureInfo.InvariantCulture,out radiusMm)) ||
+                !double.IsFinite(radiusMm))
+                throw new FormatException("Неверный радиус дуги.");
+            var before=PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
+            var changed=PreviewArcRadiusEditor.SetRadius(
+                before,ringNumber-1,segmentNumber-1,radiusMm,toleranceMm);
+            var serialized=PreviewDxfExporter.Export(changed.Rings,toleranceMm);
+            var checkedRings=PreviewDxfRoundTripVerifier.Verify(
+                changed.Rings,serialized,toleranceMm);
+            var topology=PreviewContourTopology.Analyze(checkedRings,toleranceMm);
+            if(!topology.IsValid)
+                throw new FormatException("Топология изменённой дуги не прошла проверку.");
+            var candidate=DxfReader.Parse(serialized);
+            CommitDxfPreview(candidate);
+            ResetView();
+            UpdatePartCard();
+            UpdateHoleSummary();
+            PanelTitle.Text="DXF: точная правка радиуса ARC, только предпросмотр";
+            StatusText.Text=$"Контур №{ringNumber}, ARC №{segmentNumber}, R={radiusMm:0.###} мм; "+
+                $"площадь {topology.NetAreaMm2:0.###} мм². "+
+                "Undo/Redo доступны. CAM и резка запрещены.";
+            RenderSheet();
+        }
+        catch(Exception ex) when(ex is FormatException or ArgumentException)
+        {
+            StatusText.Text="Правка радиуса ARC отклонена: "+ex.Message;
+        }
+    }
+
     private void SetDxfEdgeAngleClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
