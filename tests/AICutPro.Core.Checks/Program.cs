@@ -2671,4 +2671,57 @@ Assert(wrongArcIndexRejected,"LINE/ARC fillet refuses unsupported segment select
 Assert(lineArcBase.Segments.Count==5,
        "LINE/ARC fillet preserves source preview for Undo");
 
+// B2 ARC -> LINE is the exact reverse of an existing LINE -> ARC
+// solution. Preserve arc geometry, ring topology and source for Undo.
+PreviewSegment ReverseArcLineTestSegment(PreviewSegment segment) => segment switch
+{
+    PreviewLine line => new PreviewLine(line.End,line.Start),
+    PreviewArc arc => new PreviewArc(arc.Center,arc.RadiusMm,
+                                   arc.StartDegrees+arc.SweepDegrees,-arc.SweepDegrees),
+    _ => throw new FormatException("Unsupported test segment.")
+};
+PreviewPath ReverseArcLineTestRing(PreviewPath path) =>
+    new(path.Segments.Reverse().Select(ReverseArcLineTestSegment).ToArray(),true);
+var reversedLineArcBase=ReverseArcLineTestRing(lineArcBase);
+var arcLineRings=new PreviewPath[]{reversedLineArcBase,filletRings[1]};
+var arcLineBefore=PreviewContourTopology.Analyze(arcLineRings);
+Assert(arcLineBefore.IsValid &&
+       reversedLineArcBase.Segments[3] is PreviewArc &&
+       reversedLineArcBase.Segments[4] is PreviewLine,
+       "Reversed synthetic contour has ARC immediately before selected LINE");
+var arcLineFillet=PreviewLineArcFilletEditor.FilletOutgoingLine(
+    arcLineRings,0,4,5);
+var arcLineAfter=PreviewContourTopology.Analyze(arcLineFillet.Rings);
+var arcLineArcs=arcLineFillet.Rings[0].Segments.OfType<PreviewArc>().ToArray();
+Assert(arcLineFillet.IsValidForPreview && !arcLineFillet.CanStartMachine &&
+       arcLineAfter.IsValid &&
+       arcLineFillet.Rings[0].Segments.Count==6 &&
+       arcLineArcs.Length==2 &&
+       arcLineArcs.Any(a=>Math.Abs(a.RadiusMm-5)<1e-6) &&
+       arcLineArcs.Any(a=>Math.Abs(a.RadiusMm-20)<1e-6) &&
+       arcLineFillet.Rings[1].Segments.Count==arcLineRings[1].Segments.Count &&
+       Math.Abs(arcLineAfter.NetAreaMm2-tangentTopology.NetAreaMm2)<1e-5,
+       "ARC to LINE mirrors LINE to ARC tangent solution and preserves hole and net area");
+var arcLineRoundtrip=PreviewDxfRoundTripVerifier.Verify(
+    arcLineFillet.Rings,PreviewDxfExporter.Export(arcLineFillet.Rings));
+Assert(PreviewContourTopology.Analyze(arcLineRoundtrip).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(arcLineRoundtrip).NetAreaMm2-
+                arcLineAfter.NetAreaMm2)<1e-5,
+       "ARC to LINE fillet survives exact DXF export and reimport");
+foreach(var radius in new[]{double.NaN,double.PositiveInfinity,0d,-2d,1_000_001d})
+{
+    bool rejected=false;
+    try { PreviewLineArcFilletEditor.FilletOutgoingLine(arcLineRings,0,4,radius); }
+    catch(FormatException) { rejected=true; }
+    Assert(rejected,"Invalid ARC/LINE radius must fail without modifying drawing");
+}
+bool wrongLineRejected=false;
+try { PreviewLineArcFilletEditor.FilletOutgoingLine(arcLineRings,0,2,5); }
+catch(FormatException) { wrongLineRejected=true; }
+Assert(wrongLineRejected,"ARC/LINE solver refuses a segment not preceded by ARC");
+Assert(arcLineRings[0].Segments.Count==5 &&
+       Math.Abs(PreviewContourTopology.Analyze(arcLineRings).NetAreaMm2-
+                arcLineBefore.NetAreaMm2)<1e-6,
+       "ARC to LINE editor leaves source geometry intact for Undo");
+
 Console.WriteLine("AI CutPro core checks passed.");
