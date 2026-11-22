@@ -99,24 +99,26 @@ public static class PreviewContourTopology
     /// Supports alternate material/void islands by depth parity, but remains read-only.
     /// </summary>
     public static PreviewTopologyResult Analyze(IReadOnlyList<PreviewPath> paths,
-        double toleranceMm = 0.01)
+        double toleranceMm = 0.01, double intersectionToleranceMm = 1e-7)
     {
         ArgumentNullException.ThrowIfNull(paths);
         if (!Finite(toleranceMm)||toleranceMm<=0||toleranceMm>1)
             throw new ArgumentOutOfRangeException(nameof(toleranceMm));
+        if (!Finite(intersectionToleranceMm) || intersectionToleranceMm < 1e-9 || intersectionToleranceMm > 0.01)
+            throw new ArgumentOutOfRangeException(nameof(intersectionToleranceMm));
         if (paths.Count is < 1 or > 1000)
             return Reject("Invalid number of closed rings.");
         var measurements=new PreviewContourMetricsResult[paths.Count];
         for(var i=0;i<paths.Count;i++)
         {
-            measurements[i]=PreviewContourMetrics.Measure(paths[i],toleranceMm);
+            measurements[i]=PreviewContourMetrics.Measure(paths[i],toleranceMm,intersectionToleranceMm);
             if(!measurements[i].IsValid)
                 return Reject($"Ring {i+1}: {string.Join("; ",measurements[i].Issues)}");
         }
         for(int i=0;i<paths.Count;i++)
         for(int j=i+1;j<paths.Count;j++)
         {
-            var issues=PreviewContourValidator.ValidatePair(paths[i],paths[j],toleranceMm);
+            var issues=PreviewContourValidator.ValidatePair(paths[i],paths[j],toleranceMm,intersectionToleranceMm);
             if(issues.Count>0) return Reject($"Rings {i+1}/{j+1}: {string.Join("; ",issues)}");
         }
 
