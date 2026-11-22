@@ -282,6 +282,11 @@ public static class DxfReader
             }
             if (shapes.Count > 10000) throw new ArgumentException("Too many shapes for preview.");
         }
+        // An unfinished HEADER/ENTITIES section must never be accepted for
+        // topology-sensitive editing or manufacturing preflight. Keep parsed
+        // entities visible for diagnosis, but attach a blocking warning.
+        if (pendingSection is not null || section.Length > 0)
+            warnings.Add("DXF contains an unterminated or malformed SECTION.");
         if (units != 4)
             warnings.Add(units == null || units == 0
                 ? "DXF unit is unspecified. Confirm units before importing into millimetre jobs."
