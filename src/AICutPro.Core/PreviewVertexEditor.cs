@@ -68,6 +68,62 @@ public static class PreviewVertexEditor
         return new(updated,checkedTopology.NetAreaMm2,true);
     }
 
+    /// <summary>
+    /// Subdivides a straight edge by adding one interior vertex. The geometry must
+    /// remain collinear, so this drafting operation never changes the ring area.
+    /// Arcs and near-endpoint insertions are rejected rather than approximated.
+    /// </summary>
+    public static PreviewVertexEditResult InsertVertex(
+        IReadOnlyList<PreviewPath> rings, int ringIndex, int segmentIndex,
+        PreviewPoint position, double toleranceMm = 0.01)
+    {
+        ArgumentNullException.ThrowIfNull(rings);
+        if (!double.IsFinite(position.X) || !double.IsFinite(position.Y) ||
+            Math.Abs(position.X) > 1_000_000 || Math.Abs(position.Y) > 1_000_000)
+            throw new FormatException("Invalid or unbounded vertex coordinates.");
+        if (!double.IsFinite(toleranceMm) || toleranceMm < 0.0001 || toleranceMm > 1)
+            throw new ArgumentOutOfRangeException(nameof(toleranceMm));
+        if (rings.Count is < 1 or > 1000 || ringIndex < 0 || ringIndex >= rings.Count)
+            throw new FormatException("Invalid ring index.");
+        var original = PreviewContourTopology.Analyze(rings, toleranceMm);
+        if (!original.IsValid)
+            throw new FormatException("Original contour topology is not verified.");
+        var source = rings[ringIndex];
+        if (!source.Closed || source.Segments.Count is < 3 or >= 2000 ||
+            source.Segments.Any(s => s is not PreviewLine))
+            throw new FormatException("Insertion requires a closed line-only ring.");
+        if (segmentIndex < 0 || segmentIndex >= source.Segments.Count)
+            throw new FormatException("Invalid segment index.");
+        var segment = (PreviewLine)source.Segments[segmentIndex];
+        var dx = segment.End.X - segment.Start.X;
+        var dy = segment.End.Y - segment.Start.Y;
+        var lengthSquared = dx * dx + dy * dy;
+        if (!double.IsFinite(lengthSquared) || lengthSquared <= 4 * toleranceMm * toleranceMm)
+            throw new FormatException("Edge is too short to subdivide.");
+        var parameter = ((position.X - segment.Start.X) * dx +
+                         (position.Y - segment.Start.Y) * dy) / lengthSquared;
+        if (parameter <= 0 || parameter >= 1 ||
+            Distance(segment.Start, position) <= toleranceMm ||
+            Distance(position, segment.End) <= toleranceMm)
+            throw new FormatException("Vertex must be strictly inside the edge.");
+        var projected = new PreviewPoint(segment.Start.X + parameter * dx,
+                                         segment.Start.Y + parameter * dy);
+        if (Distance(projected, position) > toleranceMm)
+            throw new FormatException("Vertex is not on the selected straight edge.");
+        // Use the exact projected point to avoid introducing a tiny artificial kink.
+        var segments = source.Segments.ToList();
+        segments[segmentIndex] = new PreviewLine(segment.Start, projected);
+        segments.Insert(segmentIndex + 1, new PreviewLine(projected, segment.End));
+        var updated = rings.ToArray();
+        updated[ringIndex] = new PreviewPath(segments, true);
+        var verified = PreviewContourTopology.Analyze(updated, toleranceMm);
+        if (!verified.IsValid ||
+            Math.Abs(verified.NetAreaMm2 - original.NetAreaMm2) >
+            Math.Max(1e-7, Math.Abs(original.NetAreaMm2) * 1e-10))
+            throw new FormatException("Insertion changes verified contour geometry.");
+        return new(updated, verified.NetAreaMm2, true);
+    }
+
     private static double Distance(PreviewPoint a,PreviewPoint b) =>
         Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Y-b.Y)*(a.Y-b.Y));
 }

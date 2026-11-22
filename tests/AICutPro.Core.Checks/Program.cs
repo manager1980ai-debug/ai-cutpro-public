@@ -964,6 +964,30 @@ Assert(RejectVertexEdit([editSquare],3,0,new PreviewPoint(2,2)) &&
 var roundArcRing=new PreviewPath([
     new PreviewArc(new(0,0),10,0,180),
     new PreviewLine(new(-10,0),new(10,0))],true);
+// Adding a vertex along a straight edge preserves geometry and round-trip DXF.
+var insertedVertex=PreviewVertexEditor.InsertVertex(
+    [editSquare],0,0,new PreviewPoint(5,0));
+Assert(insertedVertex.Rings[0].Segments.Count==5 &&
+       Math.Abs(insertedVertex.NetAreaMm2-100)<1e-8 &&
+       !insertedVertex.CanStartMachine,
+       "Vertex insertion subdivides a straight edge without changing area");
+var insertedDxf=PreviewDxfExporter.Export(insertedVertex.Rings);
+var insertedRoundTrip=MixedContourAssembler.Assemble(DxfReader.Parse(insertedDxf).Shapes);
+Assert(insertedRoundTrip.Complete &&
+       Math.Abs(PreviewContourTopology.Analyze(insertedRoundTrip.ClosedPaths).NetAreaMm2-100)<1e-7,
+       "Inserted vertex survives DXF round-trip");
+static bool RejectVertexInsertion(IReadOnlyList<PreviewPath> rings, int ring,
+    int segment, PreviewPoint point)
+{
+    try { PreviewVertexEditor.InsertVertex(rings,ring,segment,point);return false; }
+    catch(FormatException) { return true; }
+}
+Assert(RejectVertexInsertion([editSquare],0,0,new PreviewPoint(5,2)) &&
+       RejectVertexInsertion([editSquare],0,0,new PreviewPoint(0,0)) &&
+       RejectVertexInsertion([editSquare],0,0,new PreviewPoint(15,0)) &&
+       RejectVertexInsertion([editSquare],0,99,new PreviewPoint(5,0)) &&
+       RejectVertexInsertion([roundArcRing],0,0,new PreviewPoint(5,0)),
+       "Vertex insertion rejects off-edge, endpoint, outside, invalid and arc edits");
 Assert(RejectVertexEdit([roundArcRing],0,1,new PreviewPoint(1,1)),
        "Analytical ARC is never silently distorted by LINE-only vertex editor");
 var outerRing=new PreviewPath([
