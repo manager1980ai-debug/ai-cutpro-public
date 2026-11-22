@@ -652,6 +652,9 @@ public partial class MainWindow : Window
                 Array.Empty<PreviewLengthRule>();
             var selectedVertex=vertexNumber-1;
             var selectedRing=ringNumber-1;
+            if(selectedRing<0||selectedRing>=verified.Count ||
+               selectedVertex<0||selectedVertex>=verified[selectedRing].Segments.Count)
+                throw new FormatException("Номер контура или вершины вне диапазона.");
             var n=verified[selectedRing].Segments.Count;
             var touchingLength=lengths.Any(rule=>rule.RingIndex==selectedRing &&
                 (rule.SegmentIndex==selectedVertex ||
