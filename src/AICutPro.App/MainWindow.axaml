@@ -56,6 +56,8 @@
           <Button Content="Применить поворот вокруг заданной точки X/Y" Click="RotateWholeDxfClicked"/>
           <TextBox x:Name="MirrorAxisXBox" Text="0" Watermark="Вертикальная ось отражения, X мм"/>
           <Button Content="Зеркально отразить по вертикали" Click="MirrorWholeDxfClicked"/>
+          <TextBox x:Name="MirrorAxisYBox" Text="0" Watermark="Горизонтальная ось отражения, Y мм"/>
+          <Button Content="Зеркально отразить по горизонтали" Click="MirrorHorizontalDxfClicked"/>
           <TextBlock Text="Операции меняют текущий предпросмотр и добавляются в историю Undo/Redo. Применённые смещение/поворот автоматически сбрасываются в 0, чтобы экспорт не повторил их. CAM и запуск станка запрещены." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Вершина прямолинейного контура (нумерация с 1)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
           <TextBox x:Name="EditRingIndexBox" Text="1" Watermark="Номер контура"/>
