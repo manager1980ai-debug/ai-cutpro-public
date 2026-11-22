@@ -1289,4 +1289,43 @@ for(int i=0;i<30;i++) bounded.Undo();
 Assert(!bounded.CanUndo && bounded.RedoCount==30,
        "Oldest retained snapshot is the fixed undo boundary");
 
+// B2: adding a circular hole inside a verified outer material boundary.
+var justPlate = Document(rectangle);
+var withAddedHole = PreviewCircleHoleEditor.AddHole(
+    justPlate, new PreviewPoint(100,50), 20);
+var afterAdd = PreviewContourTopology.Analyze(
+    PreviewDxfExporter.ValidateDocument(withAddedHole));
+Assert(afterAdd.IsValid && afterAdd.Rings.Count==2 &&
+       afterAdd.Rings[1].Depth==1 && !afterAdd.Rings[1].IsMaterialBoundary &&
+       Math.Abs(afterAdd.NetAreaMm2-(20000-Math.PI*100))<1e-6,
+       "New DXF hole is nested in part and material area decreases");
+var withTwoAddedHoles = PreviewCircleHoleEditor.AddHole(
+    withAddedHole,new PreviewPoint(145,50),20);
+Assert(PreviewContourTopology.Analyze(
+       PreviewDxfExporter.ValidateDocument(withTwoAddedHoles)).Rings.Count==3,
+       "A second independently verified circular hole can be added");
+static bool RejectAddHole(DxfImportResult document, double x,double y,double diameter)
+{
+    try {PreviewCircleHoleEditor.AddHole(document,new PreviewPoint(x,y),diameter); return false;}
+    catch (FormatException) {return true;}
+}
+Assert(RejectAddHole(justPlate,198,50,20) &&
+       RejectAddHole(justPlate,100,50,0) &&
+       RejectAddHole(justPlate,100,50,double.NaN) &&
+       RejectAddHole(justPlate,double.PositiveInfinity,50,20),
+       "Hole creation rejects boundary, nonpositive and nonfinite dimensions");
+Assert(RejectAddHole(withAddedHole,105,50,20),
+       "New hole must not intersect an existing hole");
+Assert(RejectAddHole(circleDoc,100,50,6),
+       "A hole nested inside another void cannot become a material island");
+var addedHolePaths=PreviewDxfExporter.ValidateDocument(withAddedHole);
+Assert(PreviewDxfRoundTripVerifier.Verify(addedHolePaths,
+       PreviewDxfExporter.Export(addedHolePaths)).Count==2,
+       "New circular hole survives strict DXF export and reimport");
+var addingHistory = new DxfPreviewHistory(justPlate);
+addingHistory.Push(withAddedHole);
+Assert(addingHistory.Undo().Shapes.Count==1 &&
+       addingHistory.Redo().Shapes.Count==2,
+       "New hole can be undone and redone without modifying original DXF");
+
 Console.WriteLine("AI CutPro core checks passed.");
