@@ -448,7 +448,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"Не удалось прочитать DXF: {ex.Message}";
+            StatusText.Text = "Не удалось прочитать DXF. " + DxfDiagnosticCatalog.ExplainRu(ex);
         }
     }
 
