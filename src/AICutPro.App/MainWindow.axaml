@@ -78,6 +78,10 @@
           <TextBlock Text="Точное скругление угла дугой ARC (радиус, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
           <TextBox x:Name="FilletRadiusBox" Text="5" Watermark="Радиус скругления, мм"/>
           <Button Content="Скруглить выбранный угол (предпросмотр)" Click="FilletDxfVertexClicked"/>
+          <TextBlock Text="Сопряжение входящей прямой LINE и следующей дуги ARC (радиус, мм)" Foreground="#E8F4FF" FontWeight="Bold" TextWrapping="Wrap"/>
+          <TextBox x:Name="LineArcFilletRadiusBox" Text="5" Watermark="Радиус переходной дуги, мм"/>
+          <Button Content="Построить касательное LINE/ARC сопряжение" Click="FilletLineArcClicked"/>
+          <TextBlock Text="Номер сегмента выше должен указывать на исходную ARC после LINE. Работает только при геометрически допустимом касательном решении; иначе отказ без изменения DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Номера контура и вершины выше; выпуклые и вогнутые LINE/LINE углы, в том числе в смешанном контуре LINE/ARC. Соседние ARC не редактируются. Проверяются геометрия и DXF; без CAM." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Использует номера контура и вершины выше. Только замкнутые LINE-контуры; проверяются отверстия и DXF." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBlock Text="Точный размер ребра, мм (номер вершины = начало ребра)" Foreground="#E8F4FF" TextWrapping="Wrap" FontWeight="Bold"/>
