@@ -40,3 +40,9 @@ The official OpenBuilds Fusion 360 plasma postprocessor documentation specifies 
 
 ## Validation evidence
 `PlasmaProcessProfile.ValidateForPlanning()` checks structurally inconsistent parameters, unapproved provenance, unavailable Arc OK/THC/Z capability; the record's `CanStartMachine` is always false. Synthetic core regression tests include negative and nonfinite delays, mismatched heights, unsupported signals, missing cut-chart reference, and unconfirmed operator. No numerical settings are represented as safe for a real machine.
+
+
+## Virtual pierce-delay rehearsal (implemented, not hardware)
+`PlasmaPierceSimulator.Rehearse(profile, inputs)` is a deterministic, synthetic-clock demonstration of the arc confirmation and delay stage. It requires a structurally accepted profile, required/supported Arc OK input, nonfaulted synthetic controller signals, and an Arc OK event within the supplied simulated timeout. The virtual cut phase is reached only if Arc OK stays present through the entire configured delay. Lost arc, timeout, E-stop, alarm, disconnection and invalid numeric inputs give a `Fault` result without a simulated cut phase.
+
+The result exposes `CanStartMachine=false` and `ProducesGCode=false` unconditionally. There is no real time, control signal, output adapter, torch enable, feed, lead-in, hardware stop or actual cutting phase. Inputs are test fixtures, not guarantees of hardware feedback. Acceptance evidence is tracked in `TASKS.md`.
