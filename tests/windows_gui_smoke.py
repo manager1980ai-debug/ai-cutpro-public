@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from pywinauto import Desktop
+from pywinauto import Desktop, keyboard
 
 
 
@@ -71,6 +71,57 @@ def probe_tab_navigation(window):
         raise RuntimeError("Empty diagnostics window has no explanatory guidance")
     diagnostic_window.close()
     print("GUI diagnostic panel PASS: opened separate offline report and empty-state guidance")
+    # Real invalid-content DXF import through the native file chooser.
+    # The extension is .dxf but the numerical coordinate is not a number.
+    bad_dxf = pathlib.Path.cwd() / "dist" / "gui_invalid_coordinate.dxf"
+    bad_dxf.parent.mkdir(parents=True, exist_ok=True)
+    bad_dxf.write_text(
+        "0\\nSECTION\\n2\\nENTITIES\\n0\\nLINE\\n8\\n0\\n"
+        "10\\nNOT_A_NUMBER\\n20\\n0\\n11\\n20\\n21\\n0\\n"
+        "0\\nENDSEC\\n0\\nEOF\\n", encoding="ascii")
+    before_dialog = {w.handle for w in Desktop(backend="uia").windows()}
+    invoke(button_named("Открыть DXF (предпросмотр)"))
+    picker = None
+    for _ in range(30):
+        windows = Desktop(backend="uia").windows()
+        choices = [w for w in windows if w.handle not in before_dialog
+                   and w.is_visible()
+                   and (w.class_name() == "#32770"
+                        or "Открыть DXF" in w.window_text()
+                        or w.window_text().lower() in ("open", "открытие"))]
+        if choices:
+            picker = choices[0]
+            break
+        time.sleep(0.25)
+    if picker is None:
+        raise RuntimeError("Windows DXF file picker was not discovered")
+    picker.set_focus()
+    # The Windows standard file dialog accepts the full absolute path in
+    # its File name field; Alt+N is the native File name mnemonic.
+    keyboard.send_keys("%n")
+    keyboard.send_keys(str(bad_dxf), with_spaces=True)
+    keyboard.send_keys("{ENTER}")
+    assert_status("DXF-1003")
+    invoke(button_named("Диагностика DXF (все замечания)"))
+    report = None
+    for _ in range(20):
+        candidates = [w for w in Desktop(backend="uia").windows()
+                      if w.process_id() == window.process_id()
+                      and "Диагностика DXF" in w.window_text()]
+        if candidates:
+            report = candidates[0]
+            break
+        time.sleep(0.3)
+    if report is None:
+        raise RuntimeError("Report with invalid DXF finding did not open")
+    texts = [x.window_text() for x in report.descendants(control_type="Text")]
+    if not any("DXF-1003" in t for t in texts):
+        raise RuntimeError("Report failed to show the structured malformed-DXF code")
+    if not any("Как исправить:" in t for t in texts):
+        raise RuntimeError("Report failed to show in-app repair guidance")
+    report.close()
+    print("GUI malformed DXF PASS: invalid coordinate rejected with code and repair guidance")
+
 
 
 
