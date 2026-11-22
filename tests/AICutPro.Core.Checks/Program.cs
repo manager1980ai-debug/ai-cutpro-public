@@ -2899,4 +2899,43 @@ try
 catch(FormatException){invalidPinRejected=true;}
 Assert(invalidPinRejected,"Persistent rule refuses ARC-only hole");
 
+// B2: bounded automatic single-vertex projection onto saved relations.
+var autoProjected=PreviewPersistentAxisConstraints.MoveVertexConstrained(
+    pinnedSource,0,1,new PreviewPoint(112,23),pinnedRules);
+var projectedEdge=(PreviewLine)autoProjected.Rings[0].Segments[0];
+Assert(autoProjected.IsValidForPreview && !autoProjected.CanStartMachine &&
+       Math.Abs(projectedEdge.End.X-112)<1e-7 &&
+       Math.Abs(projectedEdge.End.Y-projectedEdge.Start.Y)<1e-7 &&
+       PreviewContourTopology.Analyze(autoProjected.Rings).IsValid &&
+       autoProjected.Rings[1].Segments.Count==pinnedSource[1].Segments.Count,
+       "Single vertex move projects requested point onto horizontal relation");
+PreviewDxfRoundTripVerifier.Verify(autoProjected.Rings,
+    PreviewDxfExporter.Export(autoProjected.Rings));
+var constrainedRectangle=PreviewDxfExporter.ValidateDocument(Document(
+    Closed("CONSTRAINT_RECT",new Point2(0,0),new Point2(100,0),
+           new Point2(100,100),new Point2(0,100))));
+var twoAxisRules=PreviewPersistentAxisConstraints.Add(
+    constrainedRectangle,
+    PreviewPersistentAxisConstraints.Add(
+        constrainedRectangle,Array.Empty<PreviewAxisRule>(),
+        new PreviewAxisRule(0,0,true)),
+    new PreviewAxisRule(0,1,false));
+var projectedCorner=PreviewPersistentAxisConstraints.MoveVertexConstrained(
+    constrainedRectangle,0,1,new PreviewPoint(97,12),twoAxisRules);
+var projectedCornerPoint=((PreviewLine)projectedCorner.Rings[0].Segments[1]).Start;
+Assert(Math.Abs(projectedCornerPoint.X-100)<1e-7 &&
+       Math.Abs(projectedCornerPoint.Y)<1e-7 &&
+       PreviewContourTopology.Analyze(projectedCorner.Rings).IsValid,
+       "Two orthogonal pinned edges keep the shared vertex fixed on both axes");
+bool collapsedProjectionRejected=false;
+try {
+    PreviewPersistentAxisConstraints.MoveVertexConstrained(
+        pinnedSource,0,1,new PreviewPoint(0,23),pinnedRules);
+} catch(FormatException) {collapsedProjectionRejected=true;}
+Assert(collapsedProjectionRejected,
+       "Constraint projection cannot collapse an edge to zero length");
+Assert(Math.Abs(((PreviewLine)pinnedSource[0].Segments[0]).End.X-
+                 oldHorizontalLength)<1e-7,
+       "Projection never mutates the source Undo snapshot");
+
 Console.WriteLine("AI CutPro core checks passed.");
