@@ -40,7 +40,7 @@
           <TextBlock Text="Пустое поле: только исходный просмотр, без пересчёта. Единицы не угадываются." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Открыть DXF (предпросмотр)" Click="ImportDxfClicked"/>
           <TextBlock Text="История изменений DXF (до 30 шагов)" Foreground="#E8F4FF" FontWeight="Bold"/>
-          <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+          <Grid ColumnDefinitions="*,*">
             <Button Grid.Column="0" Content="Отменить изменение" Click="UndoDxfClicked"/>
             <Button Grid.Column="1" Content="Повторить изменение" Click="RedoDxfClicked"/>
           </Grid>
