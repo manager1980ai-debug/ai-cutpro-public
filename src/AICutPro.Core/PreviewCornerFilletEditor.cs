@@ -2,7 +2,8 @@ namespace AICutPro.Core;
 
 /// <summary>
 /// Preview-only circular fillet of a convex or concave corner in a verified closed
-/// LINE-only ring. Builds an exact tangent ARC, never a polyline approximation.
+/// LINE/ARC ring, where the two selected adjacent segments are LINE.
+/// Builds an exact tangent ARC, never a polyline approximation.
 /// This is CAD geometry only, not toolpath radius compensation.
 /// </summary>
 public static class PreviewCornerFilletEditor
@@ -22,23 +23,23 @@ public static class PreviewCornerFilletEditor
         if (!before.IsValid)
             throw new FormatException("Source fillet topology is invalid.");
         var ring = rings[ringIndex];
-        if (!ring.Closed || ring.Segments.Count is < 3 or > 1999 ||
-            ring.Segments.Any(x=>x is not PreviewLine))
-            throw new FormatException("Fillet requires a bounded closed LINE-only ring.");
-        var lines=ring.Segments.Cast<PreviewLine>().ToArray();
-        var n=lines.Length;
+        if (!ring.Closed || ring.Segments.Count is < 3 or > 1999)
+            throw new FormatException("Fillet requires a bounded closed LINE/ARC ring.");
+        var n=ring.Segments.Count;
         if (vertexIndex < 0 || vertexIndex >= n)
             throw new FormatException("Invalid fillet vertex index.");
-        var vertices=lines.Select(l=>l.Start).ToArray();
+        var previousIndex=(vertexIndex+n-1)%n;
+        if (ring.Segments[previousIndex] is not PreviewLine incoming ||
+            ring.Segments[vertexIndex] is not PreviewLine outgoing)
+            throw new FormatException("Selected corner must join two LINE segments.");
         static double Distance(PreviewPoint a,PreviewPoint b) =>
             Math.Sqrt((a.X-b.X)*(a.X-b.X)+(a.Y-b.Y)*(a.Y-b.Y));
-        for(var i=0;i<n;i++)
-            if(Distance(lines[i].End,vertices[(i+1)%n])>toleranceMm)
-                throw new FormatException("Original fillet edges are disconnected.");
+        if (Distance(incoming.End,outgoing.Start)>toleranceMm)
+            throw new FormatException("Selected LINE segments are disconnected.");
 
-        var corner=vertices[vertexIndex];
-        var previous=vertices[(vertexIndex+n-1)%n];
-        var next=vertices[(vertexIndex+1)%n];
+        var corner=outgoing.Start;
+        var previous=incoming.Start;
+        var next=outgoing.End;
         var length1=Distance(corner,previous);
         var length2=Distance(corner,next);
         if (!double.IsFinite(length1) || !double.IsFinite(length2) ||
@@ -54,18 +55,9 @@ public static class PreviewCornerFilletEditor
         if (Math.Abs(cross)<1e-6 || theta<1e-3 || Math.PI-theta<1e-3)
             throw new FormatException("Fillet corner is nearly straight or degenerate.");
 
-        double twiceArea=0;
-        for(var i=0;i<n;i++)
-        {
-            var a=vertices[i];var b=vertices[(i+1)%n];
-            twiceArea+=a.X*b.Y-b.X*a.Y;
-        }
-        // The signed turn sets CW/CCW for both convex and concave corners.
-        // In a concave notch the tangent arc adds material rather than
-        // cutting it away. The final exact topology and hole-parent checks
-        // reject any intrusion into an adjacent contour or narrow channel.
-        if (!double.IsFinite(twiceArea) || Math.Abs(twiceArea)<=toleranceMm*toleranceMm)
-            throw new FormatException("Fillet ring has ambiguous orientation.");
+        // The local turn sets CW/CCW for convex and concave corners.
+        // Global orientation and material ownership are checked analytically
+        // by PreviewContourTopology, including any unchanged ARC segments.
         var turn=-cross;
 
         var half=theta/2;
@@ -92,18 +84,25 @@ public static class PreviewCornerFilletEditor
         if(!double.IsFinite(sweep) || Math.Abs(sweep)<1e-6 || Math.Abs(sweep)>=180)
             throw new FormatException("Fillet ARC sweep is invalid.");
         var arc=new PreviewArc(center,radiusMm,start,sweep);
-        // Create one short incoming LINE, one true tangent ARC, and the
-        // remainder of the outgoing LINE. No unsupported segment mutations.
+        // Replace only the two LINE neighbours and insert one analytic ARC.
+        // All unrelated original ARC segments are retained without mutation.
         var segments=new List<PreviewSegment>(n+1);
         for(var i=0;i<n;i++)
         {
-            var j=(i+1)%n;
-            var a=i==vertexIndex?outPoint:vertices[i];
-            var b=j==vertexIndex?inPoint:vertices[j];
-            if(Distance(a,b)<=toleranceMm)
-                throw new FormatException("Fillet creates a degenerate line.");
-            segments.Add(new PreviewLine(a,b));
-            if(j==vertexIndex) segments.Add(arc);
+            if (i==previousIndex)
+            {
+                if(Distance(incoming.Start,inPoint)<=toleranceMm)
+                    throw new FormatException("Fillet creates a degenerate incoming edge.");
+                segments.Add(new PreviewLine(incoming.Start,inPoint));
+                segments.Add(arc);
+            }
+            else if(i==vertexIndex)
+            {
+                if(Distance(outPoint,outgoing.End)<=toleranceMm)
+                    throw new FormatException("Fillet creates a degenerate outgoing edge.");
+                segments.Add(new PreviewLine(outPoint,outgoing.End));
+            }
+            else segments.Add(ring.Segments[i]);
         }
         var updated=rings.ToArray();
         updated[ringIndex]=new PreviewPath(segments,true);
