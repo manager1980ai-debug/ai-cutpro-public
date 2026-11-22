@@ -1176,4 +1176,30 @@ Assert(RejectAlteredDxf([outerRing,innerRing],
        PreviewDxfExporter.Export([outerRing])),
        "Dropping a nested hole from DXF export fails integrity check");
 
+// Mirror images of an asymmetric notch can have the same area,
+// perimeter, entity counts and bounding box, yet different CAD shape.
+var asymmetricNotch = new PreviewPath([
+    new PreviewLine(new(0,0),new(10,0)),
+    new PreviewLine(new(10,0),new(10,10)),
+    new PreviewLine(new(10,10),new(3,7)),
+    new PreviewLine(new(3,7),new(0,10)),
+    new PreviewLine(new(0,10),new(0,0))
+],true);
+var mirroredNotch = new PreviewPath([
+    new PreviewLine(new(0,0),new(10,0)),
+    new PreviewLine(new(10,0),new(10,10)),
+    new PreviewLine(new(10,10),new(7,7)),
+    new PreviewLine(new(7,7),new(0,10)),
+    new PreviewLine(new(0,10),new(0,0))
+],true);
+var leftNotchMetrics = PreviewContourMetrics.Measure(asymmetricNotch);
+var rightNotchMetrics = PreviewContourMetrics.Measure(mirroredNotch);
+Assert(leftNotchMetrics.IsValid && rightNotchMetrics.IsValid &&
+       Math.Abs(leftNotchMetrics.AreaMm2-rightNotchMetrics.AreaMm2)<1e-8 &&
+       Math.Abs(leftNotchMetrics.PerimeterMm-rightNotchMetrics.PerimeterMm)<1e-8,
+       "Asymmetric mirror regression uses identical area and perimeter");
+Assert(RejectAlteredDxf([asymmetricNotch],
+       PreviewDxfExporter.Export([mirroredNotch])),
+       "Segment-by-segment DXF verifier rejects mirrored geometry despite equal metrics");
+
 Console.WriteLine("AI CutPro core checks passed.");
