@@ -16,6 +16,13 @@ namespace AICutPro.App;
 
 public partial class MainWindow : Window
 {
+    // One fail-closed, preview-only policy for DXF edits and exported geometry.
+    // This does not grant a CAM or equipment-motion authorization.
+    private static PreviewTopologyResult ValidatePreviewDrawing(
+        IReadOnlyList<PreviewPath> rings, double toleranceMm = 0.01) =>
+        PreviewGeometryTolerancePolicy.Create(toleranceMm, toleranceMm)
+            .ValidateDrawing(rings);
+
     private NestingResult _result = ShelfNester.Arrange(SampleJob.Sheet, SampleJob.Parts);
     private int _step;
     private WorkspaceGeometry _workspace = WorkspaceGeometry.Default;
@@ -563,7 +570,7 @@ public partial class MainWindow : Window
                 throw new FormatException("Повторно импортированный DXF содержит предупреждения.");
             var reopened=PreviewDxfRoundTripVerifier.Verify(
                 edited.Rings,serialized,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if (!topology.IsValid || reopened.Count!=edited.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,edited.NetAreaMm2*1e-9))
@@ -671,7 +678,7 @@ public partial class MainWindow : Window
             var serialized=PreviewDxfExporter.Export(edited.Rings,toleranceMm);
             var imported=DxfReader.Parse(serialized);
             var reopened=PreviewDxfRoundTripVerifier.Verify(edited.Rings,serialized,toleranceMm);
-            var checkedTopology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var checkedTopology=ValidatePreviewDrawing(reopened,toleranceMm);
             if (!checkedTopology.IsValid || reopened.Count != edited.Rings.Count ||
                 Math.Abs(checkedTopology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,edited.NetAreaMm2*1e-9))
@@ -729,7 +736,7 @@ public partial class MainWindow : Window
                 updated.Rings,serialized,toleranceMm);
             PreviewPersistentAxisConstraints.RequireCompatibleEdit(
                 original,reopened,rules,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if(!topology.IsValid||reopened.Count!=updated.Rings.Count||
                Math.Abs(topology.NetAreaMm2-updated.NetAreaMm2)>
                    Math.Max(1e-6,Math.Abs(updated.NetAreaMm2)*1e-9))
@@ -781,7 +788,7 @@ public partial class MainWindow : Window
                 throw new FormatException("DXF после фаски содержит предупреждения.");
             var reopened=PreviewDxfRoundTripVerifier.Verify(
                 edited.Rings,serialized,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if (!topology.IsValid || reopened.Count!=edited.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
@@ -832,7 +839,7 @@ public partial class MainWindow : Window
                 throw new FormatException("DXF после скругления содержит предупреждения.");
             var reopened=PreviewDxfRoundTripVerifier.Verify(
                 edited.Rings,serialized,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if (!topology.IsValid || reopened.Count!=edited.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
@@ -893,7 +900,7 @@ public partial class MainWindow : Window
                 throw new FormatException("DXF содержит неподдерживаемые данные.");
             var reopened=PreviewDxfRoundTripVerifier.Verify(
                 edited.Rings,serialized,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if(!topology.IsValid||reopened.Count!=edited.Rings.Count)
                 throw new FormatException("LINE/ARC сопряжение не прошло проверку.");
             CommitDxfPreview(imported);
@@ -944,7 +951,7 @@ public partial class MainWindow : Window
                 throw new FormatException("ARC/ARC DXF содержит предупреждения.");
             var reopened=PreviewDxfRoundTripVerifier.Verify(
                 edited.Rings,serialized,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if(!topology.IsValid||reopened.Count!=edited.Rings.Count ||
                Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                    Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
@@ -1014,7 +1021,7 @@ public partial class MainWindow : Window
             var contents = PreviewDxfExporter.Export(edited.Rings, toleranceMm);
             var candidate = DxfReader.Parse(contents);
             var reopened = PreviewDxfRoundTripVerifier.Verify(edited.Rings, contents, toleranceMm);
-            var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            var topology = ValidatePreviewDrawing(reopened, toleranceMm);
             if (!topology.IsValid || reopened.Count != edited.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2 - edited.NetAreaMm2) >
                     Math.Max(1e-6, Math.Abs(edited.NetAreaMm2) * 1e-9))
@@ -1064,7 +1071,7 @@ public partial class MainWindow : Window
             var serialized = PreviewDxfExporter.Export(updated.Rings, toleranceMm);
             var candidate = DxfReader.Parse(serialized);
             var reopened = PreviewDxfRoundTripVerifier.Verify(updated.Rings, serialized, toleranceMm);
-            var verifiedTopology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            var verifiedTopology = ValidatePreviewDrawing(reopened, toleranceMm);
             if (!verifiedTopology.IsValid || reopened.Count != updated.Rings.Count ||
                 Math.Abs(verifiedTopology.NetAreaMm2 - updated.NetAreaMm2) >
                     Math.Max(1e-6, Math.Abs(updated.NetAreaMm2) * 1e-9))
@@ -1122,7 +1129,7 @@ public partial class MainWindow : Window
             var serialized=PreviewDxfExporter.Export(changed.Rings,toleranceMm);
             var checkedRings=PreviewDxfRoundTripVerifier.Verify(
                 changed.Rings,serialized,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(checkedRings,toleranceMm);
+            var topology=ValidatePreviewDrawing(checkedRings,toleranceMm);
             if(!topology.IsValid)
                 throw new FormatException("Топология изменённой дуги не прошла проверку.");
             var candidate=DxfReader.Parse(serialized);
@@ -1170,7 +1177,7 @@ public partial class MainWindow : Window
             var serialized = PreviewDxfExporter.Export(changed.Rings, toleranceMm);
             var candidate = DxfReader.Parse(serialized);
             var reopened = PreviewDxfRoundTripVerifier.Verify(changed.Rings, serialized, toleranceMm);
-            var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            var topology = ValidatePreviewDrawing(reopened, toleranceMm);
             if (!topology.IsValid || reopened.Count != changed.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2 - changed.NetAreaMm2) >
                     Math.Max(1e-6, Math.Abs(changed.NetAreaMm2) * 1e-9))
@@ -1317,7 +1324,7 @@ public partial class MainWindow : Window
                 throw new FormatException("Результат DXF содержит неподдерживаемые данные.");
             var reopened=PreviewDxfRoundTripVerifier.Verify(
                 edited.Rings,serialized,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(reopened,toleranceMm);
+            var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if(!topology.IsValid || reopened.Count!=edited.Rings.Count ||
                 Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
@@ -1403,7 +1410,7 @@ public partial class MainWindow : Window
             var updated=PreviewArcCircleEditor.SetDiameter(
                 _dxfPreview,ringNumber-1,diameter,toleranceMm);
             var rings=PreviewDxfExporter.ValidateDocument(updated,toleranceMm);
-            var topology=PreviewContourTopology.Analyze(rings,toleranceMm);
+            var topology=ValidatePreviewDrawing(rings,toleranceMm);
             if(!topology.IsValid)
                 throw new FormatException("Изменённый ARC-DXF не прошёл проверку.");
             CommitDxfPreview(updated);
@@ -1448,7 +1455,7 @@ public partial class MainWindow : Window
             var paths = PreviewDxfExporter.ValidateDocument(updated, toleranceMm);
             var exported = PreviewDxfExporter.Export(paths, toleranceMm);
             var reopened = PreviewDxfRoundTripVerifier.Verify(paths, exported, toleranceMm);
-            var topology = PreviewContourTopology.Analyze(reopened, toleranceMm);
+            var topology = ValidatePreviewDrawing(reopened, toleranceMm);
             if (!topology.IsValid)
                 throw new FormatException("DXF с изменённым отверстием не проверен.");
 
@@ -1492,7 +1499,7 @@ public partial class MainWindow : Window
             // All document warnings and geometric shapes are verified centrally.
             // Preview-only bulge notices do not prevent safe drawing export.
             var verifiedPaths = PreviewDxfExporter.ValidateDocument(_dxfPreview,toleranceMm);
-            var original = PreviewContourTopology.Analyze(verifiedPaths,toleranceMm);
+            var original = ValidatePreviewDrawing(verifiedPaths,toleranceMm);
             var transformed = verifiedPaths.Select(path =>
                 PreviewContourTransform.Move(
                     PreviewContourTransform.Rotate(path,new PreviewPoint(0,0),degrees),
@@ -1502,7 +1509,7 @@ public partial class MainWindow : Window
             var reopened = DxfReader.Parse(contents);
             var reopenedAssembly = MixedContourAssembler.Assemble(reopened.Shapes,toleranceMm);
             var reopenedTopology = reopenedAssembly.Complete
-                ? PreviewContourTopology.Analyze(reopenedAssembly.ClosedPaths,toleranceMm)
+                ? ValidatePreviewDrawing(reopenedAssembly.ClosedPaths,toleranceMm)
                 : new PreviewTopologyResult(false,[],0,["DXF does not reassemble."]);
             if (reopened.Warnings.Count>0 ||
                 !reopenedTopology.IsValid ||
@@ -1634,7 +1641,7 @@ public partial class MainWindow : Window
             if(!topology.Complete)
                 throw new FormatException("Contours cannot be verified: " +
                     string.Join("; ",topology.Warnings));
-            var measured=PreviewContourTopology.Analyze(topology.ClosedPaths);
+            var measured=ValidatePreviewDrawing(topology.ClosedPaths);
             if(!measured.IsValid ||
                Math.Abs(measured.NetAreaMm2-model.NetAreaMm2)>
                    Math.Max(1e-6,model.NetAreaMm2*1e-9))
