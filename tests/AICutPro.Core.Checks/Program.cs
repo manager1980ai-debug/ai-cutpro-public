@@ -1247,4 +1247,46 @@ Assert(reopenedHolePaths.Count==2 &&
        PreviewContourTopology.Analyze(reopenedHolePaths).IsValid,
        "Edited circular hole survives strict DXF export/reimport checks");
 
+// B2: bounded in-memory CAD preview history; geometry-only, not machine state.
+var historySource = Document(rectangle,circleHole);
+var history = new DxfPreviewHistory(historySource);
+Assert(!history.CanUndo && !history.CanRedo &&
+       history.Current.Shapes.Count==2,"Fresh DXF history starts with no undo/redo");
+var changedCircle = PreviewCircleHoleEditor.SetHole(history.Current,0,new(100,50),30);
+history.Push(changedCircle);
+Assert(history.CanUndo && !history.CanRedo &&
+       ((DxfCircle)history.Current.Shapes[1]).Radius==15,
+       "Verified circle edit is recorded in history");
+var previousCircle = history.Undo();
+Assert(((DxfCircle)previousCircle.Shapes[1]).Radius==10 &&
+       history.CanRedo && !history.CanUndo,
+       "Undo restores previous hole dimensions");
+var forwardCircle = history.Redo();
+Assert(((DxfCircle)forwardCircle.Shapes[1]).Radius==15 &&
+       !history.CanRedo,"Redo restores edited hole dimensions");
+// A returned shape list or source array must never alter stored undo entries.
+var stolenList = (DxfShape[])history.Current.Shapes;
+stolenList[1] = new DxfCircle("HOLE",new Point2(100,50),1);
+Assert(((DxfCircle)history.Current.Shapes[1]).Radius==15,
+       "Returned DXF history snapshots are isolated from caller mutation");
+var mutableVertices = new List<Point2> {new(0,0),new(10,0),new(10,10),new(0,10)};
+var vertexHistory = new DxfPreviewHistory(Document(new DxfPolyline(
+    "CUT",mutableVertices,true)));
+mutableVertices[0]=new Point2(500,500);
+Assert(((DxfPolyline)vertexHistory.Current.Shapes[0]).Vertices[0]==new Point2(0,0),
+       "History deep-copies polyline vertices");
+// New edit after undo discards the abandoned redo branch.
+history.Undo();
+history.Push(PreviewCircleHoleEditor.SetHole(history.Current,0,new(100,50),25));
+Assert(!history.CanRedo && history.CanUndo &&
+       ((DxfCircle)history.Current.Shapes[1]).Radius==12.5,
+       "New edit after undo invalidates redo branch");
+var bounded = new DxfPreviewHistory(historySource);
+for(int i=0;i<40;i++) bounded.Push(historySource);
+Assert(bounded.UndoCount==30 && !bounded.CanRedo,
+       "Undo history remains bounded at thirty previous states");
+for(int i=0;i<30;i++) bounded.Undo();
+Assert(!bounded.CanUndo && bounded.RedoCount==30,
+       "Oldest retained snapshot is the fixed undo boundary");
+
 Console.WriteLine("AI CutPro core checks passed.");
