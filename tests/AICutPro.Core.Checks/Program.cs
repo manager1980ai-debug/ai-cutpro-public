@@ -1003,4 +1003,31 @@ var innerRing=new PreviewPath([
 Assert(RejectVertexEdit([outerRing,innerRing],1,0,new PreviewPoint(0,0)),
        "Vertex editor rejects edits making an inner hole touch the outer boundary");
 
+
+// Removing a vertex joins adjacent straight edges, with no machinery permission.
+var deletedCorner = PreviewVertexEditor.DeleteVertex([editSquare], 0, 1);
+Assert(deletedCorner.IsValidForPreview && !deletedCorner.CanStartMachine &&
+       deletedCorner.Rings[0].Segments.Count == 3 &&
+       Math.Abs(deletedCorner.NetAreaMm2 - 50) < 1e-8,
+       "Deleting a square corner creates a valid triangle with recalculated area");
+var deletedRoundTrip = MixedContourAssembler.Assemble(
+    DxfReader.Parse(PreviewDxfExporter.Export(deletedCorner.Rings)).Shapes);
+Assert(deletedRoundTrip.Complete &&
+       Math.Abs(PreviewContourTopology.Analyze(deletedRoundTrip.ClosedPaths).NetAreaMm2-50)<1e-7,
+       "Deleted corner survives DXF round trip");
+var deleteInserted = PreviewVertexEditor.DeleteVertex(insertedVertex.Rings, 0, 1);
+Assert(deleteInserted.Rings[0].Segments.Count == 4 &&
+       Math.Abs(deleteInserted.NetAreaMm2-100)<1e-8,
+       "Deleting an inserted collinear vertex restores original area");
+static bool RejectVertexDeletion(IReadOnlyList<PreviewPath> rings, int ring, int vertex)
+{
+    try { PreviewVertexEditor.DeleteVertex(rings,ring,vertex); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectVertexDeletion([editSquare],0,99) &&
+       RejectVertexDeletion([editSquare],3,0) &&
+       RejectVertexDeletion(deletedCorner.Rings,0,0) &&
+       RejectVertexDeletion([roundArcRing],0,0),
+       "Deletion rejects invalid indices, triangles and arc rings");
+
 Console.WriteLine("AI CutPro core checks passed.");
