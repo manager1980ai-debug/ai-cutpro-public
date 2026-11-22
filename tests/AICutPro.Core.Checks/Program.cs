@@ -38,6 +38,30 @@ Assert(DxfDiagnosticCatalog.ExplainRu(
     new FormatException("Truncated DXF pair")).Contains("Что делать:",StringComparison.Ordinal),
     "Import diagnostic includes actionable advice in Russian");
 
+// B1.1 geometry guidance: classify only observed warning kinds, keep
+// unknown warnings blocked, and never advertise an unavailable repair.
+var geometryCases = new (string Issue, string Code)[]
+{
+    ("Layer CUT: Open chain or branching segment graph.", "GEO-3001"),
+    ("Layer CUT: Repeated segment.", "GEO-3002"),
+    ("Layer CUT: Contour geometric intersection: crossing edges.", "GEO-3003"),
+    ("Круглые отверстия пересекаются или касаются.", "GEO-3004"),
+    ("Окружность не находится строго внутри одной детали.", "GEO-3004"),
+    ("Непроверенные данные из нового типа объекта.", "GEO-3099")
+};
+foreach (var (issue, code) in geometryCases)
+{
+    var found = DxfDiagnosticCatalog.ClassifyGeometry(issue);
+    Assert(found.Code == code, "Geometry warning resolves to expected code: " + issue);
+    var explanation = DxfDiagnosticCatalog.ExplainGeometryRu(issue);
+    Assert(explanation.Contains(code, StringComparison.Ordinal) &&
+           explanation.Contains("Что делать:", StringComparison.Ordinal) &&
+           explanation.Contains(issue, StringComparison.Ordinal),
+           "Geometry warning keeps a stable identifier, advice, and original detail");
+}
+Assert(DxfDiagnosticCatalog.All.Count(e => e.Code.StartsWith("GEO-", StringComparison.Ordinal)) == 5,
+       "Geometry diagnostic catalogue contains exactly five new entries");
+
 // Project format: round trip, unsupported versions, and malformed dimensions.
 var project = CutProject.CreateDefault() with
 {
