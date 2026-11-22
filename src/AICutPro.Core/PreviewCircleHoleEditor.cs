@@ -7,6 +7,63 @@ namespace AICutPro.Core;
 /// </summary>
 public static class PreviewCircleHoleEditor
 {
+    /// <summary>
+    /// Adds an explicit circular void strictly within an existing material
+    /// boundary. The resulting hole must be a new depth-one child of an
+    /// existing outer part, never a cut through an island or an old hole.
+    /// Geometry is preview only; no CAM or machine authorization.
+    /// </summary>
+    public static DxfImportResult AddHole(
+        DxfImportResult document, PreviewPoint center,
+        double diameterMm, double toleranceMm = 0.01)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (!double.IsFinite(toleranceMm) || toleranceMm < 0.0001 || toleranceMm > 1)
+            throw new ArgumentOutOfRangeException(nameof(toleranceMm));
+        if (!double.IsFinite(center.X) || !double.IsFinite(center.Y) ||
+            Math.Abs(center.X) > 1_000_000 || Math.Abs(center.Y) > 1_000_000 ||
+            !double.IsFinite(diameterMm) || diameterMm <= 2 * toleranceMm ||
+            diameterMm > 1_000_000)
+            throw new FormatException("Invalid hole center or diameter.");
+        var sourcePaths = PreviewDxfExporter.ValidateDocument(document, toleranceMm);
+        var original = PreviewContourTopology.Analyze(sourcePaths, toleranceMm);
+        if (!original.IsValid)
+            throw new FormatException("Original contour topology is invalid.");
+        if (document.Shapes.Count >= 10000)
+            throw new FormatException("DXF entity count limit reached.");
+        var newShape = new DxfCircle("HOLE",
+            new Point2(center.X, center.Y), diameterMm / 2);
+        var updated = document with {
+            Shapes = document.Shapes.Concat(new DxfShape[] { newShape }).ToArray()
+        };
+        var afterPaths = PreviewDxfExporter.ValidateDocument(updated, toleranceMm);
+        var after = PreviewContourTopology.Analyze(afterPaths, toleranceMm);
+        if (!after.IsValid || after.Rings.Count != original.Rings.Count + 1)
+            throw new FormatException("Adding the circle did not create one verified contour.");
+        for (int i = 0; i < original.Rings.Count; i++)
+        {
+            if (original.Rings[i].ParentIndex != after.Rings[i].ParentIndex ||
+                original.Rings[i].Depth != after.Rings[i].Depth ||
+                original.Rings[i].IsMaterialBoundary != after.Rings[i].IsMaterialBoundary)
+                throw new FormatException("Adding a circle changed existing contour ownership.");
+        }
+        var inserted = after.Rings.Count - 1;
+        if (!CircleRing(afterPaths[inserted], newShape, toleranceMm) ||
+            after.Rings[inserted].Depth != 1 ||
+            after.Rings[inserted].IsMaterialBoundary ||
+            after.Rings[inserted].ParentIndex is not int parent ||
+            !after.Rings[parent].IsMaterialBoundary ||
+            after.Rings[parent].Depth != 0)
+            throw new FormatException("New circle must be a hole strictly inside an outer part.");
+        var expectedArea = original.NetAreaMm2 - Math.PI * newShape.Radius * newShape.Radius;
+        if (Math.Abs(after.NetAreaMm2 - expectedArea) >
+            Math.Max(1e-6, Math.Abs(expectedArea) * 1e-9))
+            throw new FormatException("Unexpected material area after adding hole.");
+        var serialized = PreviewDxfExporter.Export(afterPaths, toleranceMm);
+        PreviewDxfRoundTripVerifier.Verify(afterPaths, serialized, toleranceMm);
+        return updated;
+    }
+
     public static DxfImportResult SetHole(
         DxfImportResult document, int circleIndex,
         PreviewPoint center, double diameterMm, double toleranceMm = 0.01)
