@@ -2184,4 +2184,56 @@ Assert((syntheticPlasmaProfile with { CutChartReference = "" })
            .ValidateForPlanning().Any(x=>x.Contains("Kerf")),
        "Unreferenced, unconfirmed and invalid profiles cannot pass planning validation");
 
+// Stage 3 isolated, virtual-time plasma pierce rehearsal.
+// No G-code, no real waiting and no controller or torch output.
+var pierceReady = PlasmaPierceSimulator.Rehearse(
+    syntheticPlasmaProfile,
+    new PlasmaPierceSimulator.Inputs(ArcOkAtSeconds: 0.2));
+Assert(pierceReady.Completed && pierceReady.Failure is null &&
+       !pierceReady.CanStartMachine && !pierceReady.ProducesGCode &&
+       string.Join("|",pierceReady.Events.Select(x=>x.Stage)) ==
+           "PiercePositioned|ArcRequested|ArcConfirmed|PierceDelayCompleted|CutPhaseReadyForSimulation" &&
+       Math.Abs(pierceReady.Events[^1].VirtualSeconds-0.7)<1e-10,
+       "Verified synthetic Arc OK enables the virtual pierce delay, not hardware motion");
+var pierceNoArc = PlasmaPierceSimulator.Rehearse(
+    syntheticPlasmaProfile,
+    new PlasmaPierceSimulator.Inputs(ArcOkAtSeconds:double.PositiveInfinity));
+Assert(!pierceNoArc.Completed && pierceNoArc.Failure!.Contains("timeout") &&
+       pierceNoArc.Events[^1].Stage=="Fault" &&
+       !pierceNoArc.Events.Any(x=>x.Stage=="CutPhaseReadyForSimulation"),
+       "Arc OK timeout must never enter the simulated cut phase");
+var pierceLostArc = PlasmaPierceSimulator.Rehearse(
+    syntheticPlasmaProfile,
+    new PlasmaPierceSimulator.Inputs(ArcOkAtSeconds:0.2,ArcLostAtSeconds:0.4));
+Assert(!pierceLostArc.Completed &&
+       pierceLostArc.Failure!.Contains("lost during pierce delay") &&
+       !pierceLostArc.Events.Any(x=>x.Stage=="CutPhaseReadyForSimulation"),
+       "Arc OK loss during pierce delay aborts the virtual sequence");
+foreach(var inputs in new[]{
+    new PlasmaPierceSimulator.Inputs(0.2,Connected:false),
+    new PlasmaPierceSimulator.Inputs(0.2,EmergencyStop:true),
+    new PlasmaPierceSimulator.Inputs(0.2,Alarm:true),
+    new PlasmaPierceSimulator.Inputs(0.2,ArcOkTimeoutSeconds:double.NaN),
+    new PlasmaPierceSimulator.Inputs(-1)
+})
+{
+    var faulted = PlasmaPierceSimulator.Rehearse(syntheticPlasmaProfile,inputs);
+    Assert(!faulted.Completed && faulted.Events[^1].Stage=="Fault" &&
+           !faulted.CanStartMachine && !faulted.ProducesGCode,
+           "Connection, stop, alarm, malformed timing and invalid arc timing fail closed");
+}
+var pierceOpenLoop = PlasmaPierceSimulator.Rehearse(
+    syntheticPlasmaProfile with {RequiresArcOk=false},
+    new PlasmaPierceSimulator.Inputs(0.2));
+Assert(!pierceOpenLoop.Completed &&
+       pierceOpenLoop.Failure!.Contains("mandatory"),
+       "Open-loop plasma simulation is not implicitly enabled");
+var zeroPierce = PlasmaPierceSimulator.Rehearse(
+    syntheticPlasmaProfile with { PierceDelaySeconds=0 },
+    new PlasmaPierceSimulator.Inputs(0.15));
+Assert(zeroPierce.Completed &&
+       Math.Abs(zeroPierce.Events[^1].VirtualSeconds-0.15)<1e-10 &&
+       !zeroPierce.CanStartMachine,
+       "Zero virtual delay is represented without enabling machinery");
+
 Console.WriteLine("AI CutPro core checks passed.");
