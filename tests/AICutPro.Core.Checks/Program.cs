@@ -266,6 +266,34 @@ Assert(supportedPolylineFlag.Shapes.Count == 1 &&
        supportedPolylineFlag.Warnings.Count == 0,
        "Supported closed LWPOLYLINE remains readable after stricter flag parsing");
 
+// B1: a second ENTITIES section is ambiguous. Preserve geometry for
+// diagnostic preview, but block topology-verified export and CAM preflight.
+var duplicateEntitiesSections = DxfReader.Parse(string.Join("\n", new[]
+{
+    "0","SECTION","2","HEADER","9","$INSUNITS","70","4","0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","LWPOLYLINE","90","4","70","1",
+    "10","0","20","0","10","10","20","0",
+    "10","10","20","10","10","0","20","10",
+    "0","ENDSEC",
+    "0","SECTION","2","ENTITIES",
+    "0","CIRCLE","10","5","20","5","40","1",
+    "0","ENDSEC","0","EOF"
+}));
+Assert(duplicateEntitiesSections.Shapes.Count == 2 &&
+       duplicateEntitiesSections.Warnings.Any(w => w.Contains("multiple ENTITIES sections")),
+       "Multiple ENTITIES sections remain visible for diagnosis but are warned");
+var duplicateEntitiesPreflight = GeometryPreflight.Inspect(
+    duplicateEntitiesSections, new Sheet(100,100));
+Assert(duplicateEntitiesPreflight.Status == GeometryPreflightStatus.Rejected &&
+       duplicateEntitiesPreflight.BlockingIssues.Any(w => w.Contains("multiple ENTITIES sections")),
+       "Multiple ENTITIES sections cannot pass geometry preflight");
+bool duplicateEntitiesExportRejected = false;
+try { PreviewDxfExporter.ValidateDocument(duplicateEntitiesSections); }
+catch (FormatException) { duplicateEntitiesExportRejected = true; }
+Assert(duplicateEntitiesExportRejected,
+       "Multiple ENTITIES sections must fail verified geometry export");
+
 var unknownUnit = DxfReader.Parse("0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF");
 Assert(unknownUnit.Warnings.Any(w => w.Contains("unspecified")), "Unknown units warning");
 var rejectedArc = DxfReader.Parse("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n10\n20\n0\n0\nENDSEC");
