@@ -6,7 +6,7 @@ namespace AICutPro.Core;
 /// </summary>
 public static class PreviewContourValidator
 {
-    private const double Eps = 1e-7;
+    private const double DefaultIntersectionToleranceMm = 1e-7;
     private static double Cross(PreviewPoint a, PreviewPoint b) => a.X * b.Y - a.Y * b.X;
     private static PreviewPoint Sub(PreviewPoint a, PreviewPoint b) => new(a.X-b.X,a.Y-b.Y);
     private static double Dot(PreviewPoint a, PreviewPoint b) => a.X*b.X + a.Y*b.Y;
@@ -31,23 +31,23 @@ public static class PreviewContourValidator
         var progress=sweep>=0 ? Normalize(angle-start) : Normalize(start-angle);
         return progress<=Math.Abs(sweep)+1e-6;
     }
-    private static IReadOnlyList<PreviewPoint>? Intersections(PreviewSegment s,PreviewSegment t)
+    private static IReadOnlyList<PreviewPoint>? Intersections(PreviewSegment s,PreviewSegment t, double eps)
     {
-        if(s is PreviewLine a && t is PreviewLine b) return LineLine(a,b);
-        if(s is PreviewLine l && t is PreviewArc arc) return LineArc(l,arc);
-        if(s is PreviewArc arc1 && t is PreviewLine line) return LineArc(line,arc1);
-        if(s is PreviewArc c && t is PreviewArc d) return ArcArc(c,d);
+        if(s is PreviewLine a && t is PreviewLine b) return LineLine(a,b,eps);
+        if(s is PreviewLine l && t is PreviewArc arc) return LineArc(l,arc,eps);
+        if(s is PreviewArc arc1 && t is PreviewLine line) return LineArc(line,arc1,eps);
+        if(s is PreviewArc c && t is PreviewArc d) return ArcArc(c,d,eps);
         return null;
     }
-    private static IReadOnlyList<PreviewPoint>? LineLine(PreviewLine a,PreviewLine b)
+    private static IReadOnlyList<PreviewPoint>? LineLine(PreviewLine a,PreviewLine b,double eps)
     {
         var p=a.Start; var r=Sub(a.End,a.Start);
         var q=b.Start; var s=Sub(b.End,b.Start);
         var det=Cross(r,s);
         var qmp=Sub(q,p);
-        if(Math.Abs(det)<=Eps)
+        if(Math.Abs(det)<=eps)
         {
-            if(Math.Abs(Cross(qmp,r))>Eps) return [];
+            if(Math.Abs(Cross(qmp,r))>eps) return [];
             // Collinear segments may share exactly one endpoint (a legitimate
             // subdivision), but overlapping interiors remain ambiguous.
             var useX = Math.Abs(r.X) >= Math.Abs(r.Y);
@@ -57,46 +57,46 @@ public static class PreviewContourValidator
             var b1 = useX ? b.End.X : b.End.Y;
             var lo = Math.Max(Math.Min(a0,a1),Math.Min(b0,b1));
             var hi = Math.Min(Math.Max(a0,a1),Math.Max(b0,b1));
-            if (hi < lo-Eps) return [];
-            if (hi > lo+Eps) return null;
+            if (hi < lo-eps) return [];
+            if (hi > lo+eps) return null;
             foreach (var endpoint in new[]{a.Start,a.End})
-                if (Dist(endpoint,b.Start)<=Eps || Dist(endpoint,b.End)<=Eps)
+                if (Dist(endpoint,b.Start)<=eps || Dist(endpoint,b.End)<=eps)
                     return [endpoint];
             return null;
         }
         var u=Cross(qmp,r)/det;
         var t=Cross(qmp,s)/det;
-        if(t < -Eps || t > 1+Eps || u < -Eps || u > 1+Eps) return [];
+        if(t < -eps || t > 1+eps || u < -eps || u > 1+eps) return [];
         return [new(p.X+t*r.X,p.Y+t*r.Y)];
     }
-    private static IReadOnlyList<PreviewPoint>? LineArc(PreviewLine l,PreviewArc arc)
+    private static IReadOnlyList<PreviewPoint>? LineArc(PreviewLine l,PreviewArc arc,double eps)
     {
         var d=Sub(l.End,l.Start);
         var f=Sub(l.Start,arc.Center);
         var A=Dot(d,d);
-        if(A<=Eps*Eps) return null;
+        if(A<=eps*eps) return null;
         var B=2*Dot(f,d);
         var C=Dot(f,f)-arc.RadiusMm*arc.RadiusMm;
         var discriminant=B*B-4*A*C;
-        if(discriminant < -Eps) return [];
+        if(discriminant < -eps) return [];
         var result=new List<PreviewPoint>();
         var root=Math.Sqrt(Math.Max(0,discriminant));
         foreach(var parameter in new[]{(-B-root)/(2*A),(-B+root)/(2*A)})
         {
-            if(parameter < -Eps || parameter > 1+Eps)continue;
+            if(parameter < -eps || parameter > 1+eps)continue;
             var p=new PreviewPoint(l.Start.X+parameter*d.X,l.Start.Y+parameter*d.Y);
-            if(AngleInArc(arc,p) && !result.Any(x=>Dist(x,p)<=Eps))
+            if(AngleInArc(arc,p) && !result.Any(x=>Dist(x,p)<=eps))
                 result.Add(p);
         }
         return result;
     }
-    private static IReadOnlyList<PreviewPoint>? ArcArc(PreviewArc a,PreviewArc b)
+    private static IReadOnlyList<PreviewPoint>? ArcArc(PreviewArc a,PreviewArc b,double eps)
     {
         var delta=Sub(b.Center,a.Center);
         var distance=Math.Sqrt(delta.X*delta.X+delta.Y*delta.Y);
-        if(distance<=Eps)
+        if(distance<=eps)
         {
-            if (Math.Abs(a.RadiusMm-b.RadiusMm)>Eps) return [];
+            if (Math.Abs(a.RadiusMm-b.RadiusMm)>eps) return [];
             // Exact angular interval overlap check, split at the 360-degree seam.
             // A common endpoint is allowed; a positive sweep overlap is not.
             static IReadOnlyList<(double Lo,double Hi)> Ranges(PreviewArc arc)
@@ -117,14 +117,14 @@ public static class PreviewContourValidator
             var shared=new List<PreviewPoint>();
             foreach(var p in endpoints)
                 if (AngleInArc(a,p) && AngleInArc(b,p) &&
-                    !shared.Any(q=>Dist(p,q)<=Eps))shared.Add(p);
+                    !shared.Any(q=>Dist(p,q)<=eps))shared.Add(p);
             return shared;
         }
-        if(distance>a.RadiusMm+b.RadiusMm+Eps ||
-           distance<Math.Abs(a.RadiusMm-b.RadiusMm)-Eps)return [];
+        if(distance>a.RadiusMm+b.RadiusMm+eps ||
+           distance<Math.Abs(a.RadiusMm-b.RadiusMm)-eps)return [];
         var x=(a.RadiusMm*a.RadiusMm-b.RadiusMm*b.RadiusMm+distance*distance)/(2*distance);
         var heightSquared=a.RadiusMm*a.RadiusMm-x*x;
-        if(heightSquared < -Eps) return [];
+        if(heightSquared < -eps) return [];
         var h=Math.Sqrt(Math.Max(0,heightSquared));
         var ux=delta.X/distance;var uy=delta.Y/distance;
         var center=new PreviewPoint(a.Center.X+ux*x,a.Center.Y+uy*x);
@@ -143,10 +143,12 @@ public static class PreviewContourValidator
     /// determine nesting, hole ownership, or eligibility for CAM.
     /// </summary>
     public static IReadOnlyList<string> ValidatePair(PreviewPath first, PreviewPath second,
-        double toleranceMm = 0.01)
+        double toleranceMm = 0.01, double intersectionToleranceMm = DefaultIntersectionToleranceMm)
     {
         ArgumentNullException.ThrowIfNull(first);
         ArgumentNullException.ThrowIfNull(second);
+        if (!double.IsFinite(intersectionToleranceMm) || intersectionToleranceMm < 1e-9 || intersectionToleranceMm > 0.01)
+            throw new ArgumentOutOfRangeException(nameof(intersectionToleranceMm));
         if (!double.IsFinite(toleranceMm) || toleranceMm <= 0 || toleranceMm > 1)
             throw new ArgumentOutOfRangeException(nameof(toleranceMm));
         if (!first.Closed || !second.Closed ||
@@ -159,7 +161,7 @@ public static class PreviewContourValidator
         for (int i = 0; i < first.Segments.Count; i++)
         for (int j = 0; j < second.Segments.Count; j++)
         {
-            var hits = Intersections(first.Segments[i], second.Segments[j]);
+            var hits = Intersections(first.Segments[i], second.Segments[j], intersectionToleranceMm);
             if (hits is null)
                 return [$"Ambiguous coincident or overlapping boundaries at {i + 1}/{j + 1}."];
             if (hits.Count > 0)
@@ -168,9 +170,12 @@ public static class PreviewContourValidator
         return [];
     }
 
-    public static IReadOnlyList<string> Validate(PreviewPath path,double joinToleranceMm=0.01)
+    public static IReadOnlyList<string> Validate(PreviewPath path,double joinToleranceMm=0.01,
+        double intersectionToleranceMm=DefaultIntersectionToleranceMm)
     {
         if(path is null)throw new ArgumentNullException(nameof(path));
+        if (!double.IsFinite(intersectionToleranceMm) || intersectionToleranceMm < 1e-9 || intersectionToleranceMm > 0.01)
+            throw new ArgumentOutOfRangeException(nameof(intersectionToleranceMm));
         if(!path.Closed)return ["The contour is not closed."];
         if(!double.IsFinite(joinToleranceMm)||joinToleranceMm<=0||joinToleranceMm>1)
             throw new ArgumentOutOfRangeException(nameof(joinToleranceMm));
@@ -185,7 +190,7 @@ public static class PreviewContourValidator
         for(int i=0;i<segments.Count;i++)
         for(int j=i+1;j<segments.Count;j++)
         {
-            var intersections=Intersections(segments[i],segments[j]);
+            var intersections=Intersections(segments[i],segments[j],intersectionToleranceMm);
             if(intersections is null)
             {
                 warnings.Add($"Ambiguous overlapping or coincident segments {i+1} and {j+1}.");
