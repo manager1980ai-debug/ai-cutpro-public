@@ -2724,4 +2724,52 @@ Assert(arcLineRings[0].Segments.Count==5 &&
                 arcLineBefore.NetAreaMm2)<1e-6,
        "ARC to LINE editor leaves source geometry intact for Undo");
 
+// B2: two clockwise quarter-circle ARCs with a sharp 90-degree
+// direction change at their shared endpoint. Fillet must be analytical,
+// tangent in traversal direction, and leave a separate circular hole intact.
+var twoArcProfile=new PreviewPath(new PreviewSegment[]{
+    new PreviewLine(new PreviewPoint(0,0),new PreviewPoint(100,0)),
+    new PreviewArc(new PreviewPoint(120,0),20,180,-90),
+    new PreviewArc(new PreviewPoint(140,20),20,180,-90),
+    new PreviewLine(new PreviewPoint(140,40),new PreviewPoint(140,100)),
+    new PreviewLine(new PreviewPoint(140,100),new PreviewPoint(0,100)),
+    new PreviewLine(new PreviewPoint(0,100),new PreviewPoint(0,0))
+},true);
+var arcArcRings=new PreviewPath[]{twoArcProfile,filletRings[1]};
+var arcArcBefore=PreviewContourTopology.Analyze(arcArcRings);
+Assert(arcArcBefore.IsValid && arcArcRings.Length==2,
+       "Two quarter-circle ARC source with separate hole is topologically valid");
+var arcArcResult=PreviewArcArcFilletEditor.Fillet(arcArcRings,0,2,5);
+var arcArcAfter=PreviewContourTopology.Analyze(arcArcResult.Rings);
+var arcArcSegments=arcArcResult.Rings[0].Segments.OfType<PreviewArc>().ToArray();
+Assert(arcArcResult.IsValidForPreview && !arcArcResult.CanStartMachine &&
+       arcArcAfter.IsValid && arcArcAfter.Rings.Count==2 &&
+       arcArcResult.Rings[0].Segments.Count==7 &&
+       arcArcSegments.Length==3 &&
+       arcArcSegments.Any(a=>Math.Abs(a.RadiusMm-5)<1e-6) &&
+       arcArcSegments.Count(a=>Math.Abs(a.RadiusMm-20)<1e-6)==2 &&
+       arcArcResult.Rings[1].Segments.Count==arcArcRings[1].Segments.Count,
+       "ARC/ARC tangent fillet retains both original curvature radii and hole");
+var arcArcDxf=PreviewDxfExporter.Export(arcArcResult.Rings);
+var arcArcVerified=PreviewDxfRoundTripVerifier.Verify(arcArcResult.Rings,arcArcDxf);
+Assert(PreviewContourTopology.Analyze(arcArcVerified).IsValid &&
+       Math.Abs(PreviewContourTopology.Analyze(arcArcVerified).NetAreaMm2-
+                arcArcAfter.NetAreaMm2)<1e-5,
+       "Analytic ARC/ARC fillet survives exact DXF export and round trip");
+foreach(var invalidRadius in new[]{double.NaN,double.PositiveInfinity,0d,-1d,1_000_001d})
+{
+    bool rejected=false;
+    try { PreviewArcArcFilletEditor.Fillet(arcArcRings,0,2,invalidRadius); }
+    catch(FormatException){rejected=true;}
+    Assert(rejected,"Invalid ARC/ARC tangent fillet radius must fail closed");
+}
+bool invalidArcArcSelection=false;
+try { PreviewArcArcFilletEditor.Fillet(arcArcRings,0,3,5); }
+catch(FormatException){invalidArcArcSelection=true;}
+Assert(invalidArcArcSelection,"ARC/ARC solver refuses a LINE instead of adjacent ARC");
+Assert(twoArcProfile.Segments.Count==6 &&
+       Math.Abs(PreviewContourTopology.Analyze(arcArcRings).NetAreaMm2-
+                arcArcBefore.NetAreaMm2)<1e-6,
+       "ARC/ARC fillet never mutates original Undo snapshot");
+
 Console.WriteLine("AI CutPro core checks passed.");
