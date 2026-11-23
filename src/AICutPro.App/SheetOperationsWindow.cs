@@ -507,16 +507,19 @@ public sealed class SheetOperationsWindow : Window
             }
             if (length > 8_000_000)
                 throw new FormatException("Файл назначений слишком большой.");
+            var rawJson = new string(buffer, 0, length);
             var stagedLine = new SheetLineAssignmentRegister();
             var stagedU = new SheetUShapeAssignmentRegister();
             var stagedChain = new SheetChainAssignmentRegister();
             SheetLineAssignmentSidecar.Restore(
-                new string(buffer, 0, length), _dxfLines, _sheet,
+                rawJson, _dxfLines, _sheet,
                 stagedLine, stagedU, stagedChain);
             RequireNoCrossAssignments(stagedLine, stagedU, stagedChain);
-            _assignments.ReplaceValidated(stagedLine.Snapshot());
-            _uAssignments.ReplaceValidated(stagedU.Snapshot());
-            _chainAssignments.ReplaceValidated(stagedChain.Snapshot());
+            // Reuse the core's atomic validated replacement, rather than
+            // exposing its internal register mutation to the UI assembly.
+            SheetLineAssignmentSidecar.Restore(
+                rawJson, _dxfLines, _sheet,
+                _assignments, _uAssignments, _chainAssignments);
             if (_sourceLine.SelectedIndex > 0)
                 ApplySelectedLine();
             _status.Text = $"Восстановлено назначений: {_assignments.Count}; П-образных групп: {_uAssignments.Count}; цепочек: {_chainAssignments.Count}. " +
@@ -852,11 +855,12 @@ public sealed class SheetOperationsWindow : Window
             if (length > 8_000_000)
                 throw new FormatException("Файл смешанных назначений слишком большой.");
             var stagedMixed = new SheetMixedChainAssignmentRegister();
+            var rawJson = new string(buffer, 0, length);
             SheetMixedChainSidecar.Restore(
-                new string(buffer, 0, length), _allDxfShapes,
-                _sheet, stagedMixed);
+                rawJson, _allDxfShapes, _sheet, stagedMixed);
             RequireNoCrossAssignments(mixedRegister: stagedMixed);
-            _mixedAssignments.ReplaceValidated(stagedMixed.Snapshot());
+            SheetMixedChainSidecar.Restore(
+                rawJson, _allDxfShapes, _sheet, _mixedAssignments);
             _status.Text = $"Восстановлено смешанных цепочек: {_mixedAssignments.Count}. " +
                 "Только предпросмотр, без команд станку.";
         }
