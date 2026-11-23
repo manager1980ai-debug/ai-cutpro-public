@@ -25,6 +25,7 @@ public partial class MainWindow : Window
 
     private NestingResult _result = ShelfNester.Arrange(SampleJob.Sheet, SampleJob.Parts);
     private int _step;
+    private CutProject _project = CutProject.CreateDefault();
     private WorkspaceGeometry _workspace = WorkspaceGeometry.Default;
     private VirtualMachine _virtualMachine = VirtualMachine.Create(WorkspaceGeometry.Default);
     private DxfImportResult? _dxfPreview;
@@ -43,6 +44,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ShowProjectFields(_project);
         SheetCanvas.PointerWheelChanged += CanvasPointerWheelChanged;
         SheetCanvas.PointerPressed += CanvasPointerPressed;
         SheetCanvas.PointerMoved += CanvasPointerMoved;
@@ -1827,7 +1829,7 @@ public partial class MainWindow : Window
         HeadXBox.Text = HeadYBox.Text = HeadZBox.Text = "0";
         _step = 0;
         ResetView();
-        _result = ShelfNester.Arrange(requested.MaterialSheet, SampleJob.Parts);
+        _result = ShelfNester.Arrange(requested.MaterialSheet, _project.Parts);
         PanelTitle.Text = $"Раскрой листа {sheetWidth:0.###} × {sheetHeight:0.###} мм";
         StatusText.Text = "Размеры стола и листа обновлены независимо. Это виртуальные параметры.";
         UpdateSummary();
@@ -1873,7 +1875,7 @@ public partial class MainWindow : Window
         _dxfHistory = null;
         ResetView();
         PanelTitle.Text = $"Раскрой листа {_workspace.MaterialSheet.WidthMm:0.###} × {_workspace.MaterialSheet.HeightMm:0.###} мм";
-        _result = ShelfNester.Arrange(_workspace.MaterialSheet, SampleJob.Parts);
+        _result = ShelfNester.Arrange(_workspace.MaterialSheet, _project.Parts);
         StatusText.Text = "Раскладка пересчитана";
         UpdateSummary();
     }
@@ -1886,6 +1888,193 @@ public partial class MainWindow : Window
     }
     private void ManualClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
         => StatusText.Text = "Ручное управление X/Y/Z: следующий этап, движение станка невозможно";
+    private static bool ProjectNumber(string? source, out double value)
+    {
+        return double.TryParse(source, NumberStyles.Float,
+                   CultureInfo.CurrentCulture, out value) ||
+               double.TryParse(source, NumberStyles.Float,
+                   CultureInfo.InvariantCulture, out value);
+    }
+
+    private void ShowProjectFields(CutProject project)
+    {
+        ProjectNameBox.Text = project.Name;
+        ProjectMaterialBox.Text = project.Material;
+        ProjectThicknessBox.Text = project.ThicknessMm.ToString("R", CultureInfo.InvariantCulture);
+        var part = project.Parts[0];
+        ProjectPartNameBox.Text = part.Name;
+        ProjectPartWidthBox.Text = part.WidthMm.ToString("R", CultureInfo.InvariantCulture);
+        ProjectPartHeightBox.Text = part.HeightMm.ToString("R", CultureInfo.InvariantCulture);
+        ProjectPartQuantityBox.Text = part.Quantity.ToString(CultureInfo.InvariantCulture);
+        SheetWidthBox.Text = project.Sheet.WidthMm.ToString("R", CultureInfo.InvariantCulture);
+        SheetHeightBox.Text = project.Sheet.HeightMm.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    private CutProject ReadProjectFields()
+    {
+        if (!ProjectNumber(ProjectThicknessBox.Text, out var thickness) ||
+            !ProjectNumber(ProjectPartWidthBox.Text, out var width) ||
+            !ProjectNumber(ProjectPartHeightBox.Text, out var height) ||
+            !ProjectNumber(SheetWidthBox.Text, out var sheetWidth) ||
+            !ProjectNumber(SheetHeightBox.Text, out var sheetHeight) ||
+            !int.TryParse(ProjectPartQuantityBox.Text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out var quantity))
+            throw new FormatException("Проверьте числовые размеры, толщину и количество.");
+        // Preserve any previously loaded additional parts: this first
+        // editor edits the first part, never silently deletes the others.
+        var parts = _project.Parts.ToList();
+        parts[0] = new Part(ProjectPartNameBox.Text?.Trim() ?? "",
+            width, height, quantity);
+        var candidate = _project with
+        {
+            Name = ProjectNameBox.Text?.Trim() ?? "",
+            Material = ProjectMaterialBox.Text?.Trim() ?? "",
+            ThicknessMm = thickness,
+            Sheet = new Sheet(sheetWidth, sheetHeight),
+            Parts = parts
+        };
+        CutProjectSerializer.Validate(candidate);
+        return candidate;
+    }
+
+    private void AdoptProject(CutProject candidate)
+    {
+        // Commit only after both project and workspace checks succeed.
+        CutProjectSerializer.Validate(candidate);
+        var table = _workspace.Table;
+        if (candidate.Sheet.WidthMm > table.WidthMm ||
+            candidate.Sheet.HeightMm > table.HeightMm)
+            table = new Sheet(Math.Max(table.WidthMm, candidate.Sheet.WidthMm),
+                              Math.Max(table.HeightMm, candidate.Sheet.HeightMm));
+        var workspace = new WorkspaceGeometry(table, candidate.Sheet);
+        if (workspace.Validate().Count > 0)
+            throw new FormatException("Размер листа не помещается в виртуальном столе.");
+        var preview = ShelfNester.Arrange(candidate.Sheet, candidate.Parts);
+        _project = candidate;
+        _workspace = workspace;
+        _virtualMachine = VirtualMachine.Create(workspace);
+        _result = preview;
+        _step = 0;
+        _selectedPlacement = null;
+        _selectedDxfLine = null;
+        _dxfPreview = null;
+        _dxfHistory = null;
+        _dxfDiagnostics = [];
+        ShowProjectFields(candidate);
+        TableWidthBox.Text = workspace.Table.WidthMm.ToString("R", CultureInfo.InvariantCulture);
+        TableHeightBox.Text = workspace.Table.HeightMm.ToString("R", CultureInfo.InvariantCulture);
+        HeadXBox.Text = HeadYBox.Text = HeadZBox.Text = "0";
+        ResetView();
+        UpdateSummary();
+    }
+
+    private void ApplyProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is not null)
+                throw new FormatException("Закройте DXF перед изменением данных проекта: нельзя терять аннотации чертежа.");
+            var candidate = ReadProjectFields();
+            if (candidate.DxfWorkspace is not null)
+                throw new FormatException("Редактирование проекта со встроенным DXF через этот упрощённый блок пока недоступно.");
+            AdoptProject(candidate);
+            StatusText.Text = "Параметры проекта применены. Сохраните JSON для постоянного хранения.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Параметры проекта не приняты: " + ex.Message;
+        }
+    }
+
+    private void NewProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is not null)
+                throw new FormatException("Открыт DXF. Завершите работу с чертежом перед созданием другого проекта.");
+            AdoptProject(CutProject.CreateDefault());
+            StatusText.Text = "Создан новый редактируемый проект. CAM и резка не доступны.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Не удалось создать проект: " + ex.Message;
+        }
+    }
+
+    private async void SaveProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is not null)
+                throw new FormatException("Активный DXF и его назначения ещё не подключены к основному редактору проекта. Сохранение остановлено, чтобы не потерять данные.");
+            var candidate = ReadProjectFields();
+            if (candidate.DxfWorkspace is not null)
+                throw new FormatException("Повторное сохранение проекта со встроенным DXF в этом интерфейсе пока не реализовано.");
+            var json = CutProjectSerializer.Serialize(candidate);
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Сохранить рабочий проект AI CutPro",
+                SuggestedFileName = "AI-CutPro-project.json",
+                DefaultExtension = "json",
+                FileTypeChoices = [new FilePickerFileType("Проект AI CutPro")
+                    { Patterns = ["*.json"] }]
+            });
+            if (file is null) return;
+            await using var stream = await file.OpenWriteAsync();
+            stream.SetLength(0);
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(json);
+            await writer.FlushAsync();
+            _project = candidate;
+            StatusText.Text = "Проект сохранён в JSON. DXF и команды станка не включены.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or IOException
+                                   or UnauthorizedAccessException or NotSupportedException)
+        {
+            StatusText.Text = "Сохранение проекта отклонено: " + ex.Message;
+        }
+    }
+
+    private async void OpenProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is not null)
+                throw new FormatException("Закройте активный DXF перед открытием проекта, чтобы не потерять чертёж.");
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Открыть рабочий проект AI CutPro",
+                AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType("Проект AI CutPro")
+                    { Patterns = ["*.json"] }]
+            });
+            if (files.Count != 1) return;
+            await using var stream = await files[0].OpenReadAsync();
+            if (stream.CanSeek && stream.Length > 20_000_000)
+                throw new FormatException("Файл проекта слишком большой.");
+            using var reader = new StreamReader(stream);
+            var buffer = new char[20_000_001];
+            var read = 0;
+            while (read < buffer.Length)
+            {
+                var n = await reader.ReadAsync(buffer.AsMemory(read));
+                if (n == 0) break;
+                read += n;
+            }
+            if (read > 20_000_000) throw new FormatException("Файл проекта слишком большой.");
+            var loaded = CutProjectSerializer.Deserialize(new string(buffer, 0, read));
+            if (loaded.DxfWorkspace is not null)
+                throw new FormatException("Проект содержит DXF. Ядро поддерживает его проверку, но основной редактор пока не восстанавливает такой чертёж. Текущий проект не изменён.");
+            AdoptProject(loaded);
+            StatusText.Text = $"Проект «{loaded.Name}» открыт: {loaded.Parts.Count} деталей, лист {loaded.Sheet.WidthMm:0.###} × {loaded.Sheet.HeightMm:0.###} мм.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or IOException
+                                   or UnauthorizedAccessException or NotSupportedException)
+        {
+            StatusText.Text = "Открытие проекта отклонено: " + ex.Message;
+        }
+    }
+
     private void SaveClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         // Save simple job metadata only. Do not claim DXF or machine programs.
