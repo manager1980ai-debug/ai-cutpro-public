@@ -38,6 +38,15 @@ def probe_tab_navigation(window):
         raise RuntimeError(
             f"GUI did not update text after interaction: {fragment!r}")
 
+    for action in ("Применить параметры проекта", "Создать новый проект",
+                   "Открыть проект (.json)", "Сохранить проект (.json)"):
+        button_named(action)
+    invoke(button_named("Применить параметры проекта"))
+    assert_status("Параметры проекта применены.")
+    invoke(button_named("Создать новый проект"))
+    assert_status("Создан новый редактируемый проект.")
+    print("GUI project controls PASS: apply/create are live, open/save are present")
+
     invoke(button_named("История"))
     assert_status("Раздел «История»")
     assert_status("История")
@@ -509,6 +518,53 @@ def probe_selected_dxf_line(executable):
 
 
 
+def probe_project_file(executable):
+    """Reopen an actual v1 JSON project through the same model as the UI."""
+    import json
+    fixture = pathlib.Path.cwd() / "dist" / "gui_project_fixture.json"
+    fixture.parent.mkdir(parents=True, exist_ok=True)
+    fixture.write_text(json.dumps({
+        "FormatVersion": 1, "Name": "GUI_PROJECT_ROUNDTRIP",
+        "Sheet": {"WidthMm": 800, "HeightMm": 500},
+        "Parts": [{"Name": "GUI_BRACKET", "WidthMm": 80,
+                   "HeightMm": 50, "Quantity": 3}],
+        "Material": "Steel", "ThicknessMm": 2.5
+    }), encoding="utf-8")
+    proc = subprocess.Popen([str(executable), "--open-project", str(fixture)],
+                            cwd=executable.parent)
+    try:
+        project_window = None
+        for _ in range(30):
+            if proc.poll() is not None:
+                raise RuntimeError("Project fixture process exited early")
+            matches = [w for w in Desktop(backend="uia").windows()
+                       if w.process_id() == proc.pid and
+                       "AI CutPro" in w.window_text()]
+            if matches:
+                project_window = matches[0]
+                break
+            time.sleep(0.25)
+        if project_window is None:
+            raise RuntimeError("Reopened project window did not appear")
+        for _ in range(20):
+            labels = [x.window_text() for x in
+                      project_window.descendants(control_type="Text")]
+            if any("GUI_PROJECT_ROUNDTRIP" in t and
+                   "800" in t and "500" in t for t in labels):
+                break
+            time.sleep(0.3)
+        else:
+            raise RuntimeError("Real project JSON did not reopen in GUI: " +
+                               repr(labels[-10:]))
+        print("GUI project file PASS: parsed real JSON and reopened dimensions")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main() -> None:
     # GitHub-hosted Windows consoles can default to a legacy codepage; the
     # Russian title is valid UI data and must not make logging fail.
@@ -553,6 +609,7 @@ def main() -> None:
                     probe_malformed_dxf(executable)
                     probe_open_contour_layer(executable)
                     probe_selected_dxf_line(executable)
+                    probe_project_file(executable)
                     print(
                         f"GUI smoke passed: title={window.window_text()!r}, "
                         f"pid={process.pid}, handle={window.handle}, "
