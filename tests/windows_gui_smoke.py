@@ -332,8 +332,34 @@ def probe_selected_dxf_line(executable):
             raise RuntimeError(
                 "DXF selection did not populate coordinate text boxes: "
                 + repr(coordinate_values))
+        assign_buttons = [b for b in operation_window.descendants(control_type="Button")
+                          if b.window_text() == "Назначить операцию выбранной DXF LINE (сеанс)"]
+        if len(assign_buttons) != 1:
+            raise RuntimeError("Session operation assignment action not found")
+        assign_buttons[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Назначено линий: 1" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Imported DXF LINE operation was not assigned")
+        clear_buttons = [b for b in operation_window.descendants(control_type="Button")
+                         if b.window_text() == "Снять назначение с DXF LINE"]
+        if len(clear_buttons) != 1:
+            raise RuntimeError("Session operation clear action not found")
+        clear_buttons[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Назначено линий: 0" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Imported DXF LINE operation was not cleared")
         operation_window.close()
-        print("GUI DXF LINE selection PASS: CUT_SAMPLE selected and numeric editor fields = 15,35 -> 180,35")
+        print("GUI DXF LINE selection PASS: endpoints confirmed, session assignment and removal verified")
     finally:
         launched.terminate()
         try:
