@@ -463,8 +463,43 @@ def probe_selected_dxf_line(executable):
             time.sleep(0.2)
         else:
             raise RuntimeError("Connected imported ARC+LINE was not previewed: " + repr(labels))
+        mixed_assign = [b for b in operation_window.descendants(control_type="Button")
+                        if b.window_text() ==
+                        "Назначить смешанную цепочку (предпросмотр)"]
+        mixed_remove = [b for b in operation_window.descendants(control_type="Button")
+                        if b.window_text() ==
+                        "Снять назначение смешанной цепочки"]
+        mixed_save = [b for b in operation_window.descendants(control_type="Button")
+                      if b.window_text() ==
+                      "Сохранить смешанные назначения (.json)"]
+        mixed_load = [b for b in operation_window.descendants(control_type="Button")
+                      if b.window_text() ==
+                      "Загрузить смешанные назначения (.json)"]
+        if not (len(mixed_assign) == len(mixed_remove) ==
+                len(mixed_save) == len(mixed_load) == 1):
+            raise RuntimeError("Mixed annotation assignment and JSON actions missing")
+        mixed_assign[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Назначена смешанная цепочка. Всего: 1" in value
+                   for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Imported ARC/LINE mixed assignment failed: " + repr(labels))
+        mixed_remove[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Смешанных цепочек осталось: 0" in value
+                   for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Mixed annotation removal failed: " + repr(labels))
         operation_window.close()
-        print("GUI DXF ARC+LINE mixed preview PASS: analytic curve stays display-only")
+        print("GUI mixed ARC+LINE preview and assignment/removal PASS")
     finally:
         launched.terminate()
         try:
