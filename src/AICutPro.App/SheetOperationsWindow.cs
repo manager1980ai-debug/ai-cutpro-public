@@ -67,6 +67,9 @@ public sealed class SheetOperationsWindow : Window
             _endX.Text = line.End.X.ToString("R", CultureInfo.InvariantCulture);
             _endY.Text = line.End.Y.ToString("R", CultureInfo.InvariantCulture);
             RenderPreview();
+            _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
+                $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
+                $"X {line.End.X:0.###}, Y {line.End.Y:0.###}. " + _status.Text;
         };
         _startX = Field("0");
         _startY = Field("50");
