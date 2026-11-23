@@ -4240,4 +4240,31 @@ Assert(!savedMixed.Assign(mixedAnnotation with {
 }, mixedOpenShapes, mixedOpenSheet).IsValid,
     "Mixed chain rejects legacy inferred processing mode");
 
+// Stage 2: prevent cross-format assignment collisions when JSON files are separate.
+var noOldLines = new SheetLineAssignmentRegister();
+var noOldU = new SheetUShapeAssignmentRegister();
+var noOldStraight = new SheetChainAssignmentRegister();
+Assert(SheetTechnologyOverlapReview.Inspect(
+    mixedOpenShapes, mixedOpenSheet, noOldLines, noOldU,
+    noOldStraight, savedMixed).Count == 0,
+    "One mixed chain without older technology has no source conflicts");
+var collidingLegacy = new SheetLineAssignmentRegister();
+var sourceLineForConflict = (DxfLine)mixedOpenShapes[0];
+Assert(collidingLegacy.Assign(
+    0, sourceLineForConflict.Start, sourceLineForConflict.End,
+    new SheetLineOperation(SheetOperationKind.OpenThroughCut,
+        sourceLineForConflict.Start, sourceLineForConflict.End,
+        Processing: SheetLineProcessingMode.ThroughCut),
+    mixedOpenSheet).IsValid, "Legacy line assignment can be independently staged");
+var crossFormatIssues = SheetTechnologyOverlapReview.Inspect(
+    mixedOpenShapes, mixedOpenSheet, collidingLegacy, noOldU,
+    noOldStraight, savedMixed);
+Assert(crossFormatIssues.Count > 0 &&
+    crossFormatIssues.Any(x => x.Contains("both", StringComparison.OrdinalIgnoreCase)),
+    "LINE and mixed ARC chain cannot silently double-assign same DXF source");
+Assert(SheetTechnologyOverlapReview.Inspect(
+    mixedOpenShapes, mixedOpenSheet, noOldLines, noOldU,
+    noOldStraight, reloadedMixed).Count == 0,
+    "A restored mixed chain can safely coexist with empty legacy registries");
+
 Console.WriteLine("AI CutPro core checks passed.");
