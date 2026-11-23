@@ -4381,4 +4381,46 @@ Assert(RefuseBundledFile(projectWithDxf with
     }
 }), "Project restore refuses wrong DXF units even for a valid JSON object");
 
+// B2: independent open components can intersect despite valid local topology.
+var crossingLayers = new DxfShape[]
+{
+    new DxfLine("CUT-A", new Point2(10, 30), new Point2(90, 30)),
+    new DxfLine("CUT-B", new Point2(50, 10), new Point2(50, 80))
+};
+var independentCrossing = DxfIndependentOpenPathReview.Inspect(
+    crossingLayers, mixedOpenSheet);
+Assert(!independentCrossing.IsValid &&
+    independentCrossing.OpenComponentCount == 2 &&
+    independentCrossing.Issues.Any(x => x.Contains(
+        "intersect or touch", StringComparison.OrdinalIgnoreCase)) &&
+    !independentCrossing.CanGenerateMachineCommands,
+    "Two individually valid DXF LINE paths crossing on different layers are refused");
+var independentClear = DxfIndependentOpenPathReview.Inspect(
+    [crossingLayers[0], new DxfLine("CUT-B",
+        new Point2(50, 40), new Point2(50, 80))],
+    mixedOpenSheet);
+Assert(independentClear.IsValid && independentClear.OpenComponentCount == 2,
+    "Two disjoint open components on different layers are accepted as separate previews");
+var tangentCircleArc = new PreviewPath([
+    new PreviewArc(new PreviewPoint(60, 60), 20, 0, 180)
+], false);
+var tangentLine = new PreviewPath([
+    new PreviewLine(new PreviewPoint(40, 80), new PreviewPoint(80, 80))
+], false);
+Assert(PreviewContourValidator.ValidateDistinctPaths(
+    tangentCircleArc, tangentLine).Count > 0,
+    "Analytic line-to-arc tangency across independent paths is detected");
+Assert(PreviewContourValidator.ValidateDistinctPaths(
+    new PreviewPath([new PreviewLine(new PreviewPoint(5, 5),
+        new PreviewPoint(25, 5))], false),
+    new PreviewPath([new PreviewLine(new PreviewPoint(5, 15),
+        new PreviewPoint(25, 15))], false)).Count == 0,
+    "Independent separated analytic paths do not produce false collisions");
+var sameLayerSeparated = DxfIndependentOpenPathReview.Inspect(
+    [new DxfLine("SAME", new Point2(5, 5), new Point2(25, 5)),
+     new DxfLine("SAME", new Point2(5, 15), new Point2(25, 15))],
+    mixedOpenSheet);
+Assert(sameLayerSeparated.IsValid && sameLayerSeparated.OpenComponentCount == 2,
+    "Two disconnected, clearly separated same-layer components remain distinct");
+
 Console.WriteLine("AI CutPro core checks passed.");
