@@ -4462,6 +4462,38 @@ catch (FormatException) { rejectedExcessEntities = true; }
 Assert(rejectedExcessEntities,
     "1001 DXF entities are rejected without truncating the project");
 
+// Stage 2: every technology register must be empty after source replacement.
+// Compare both serialized sidecars against a newly built, annotation-free
+// workspace, not merely against the one mixed-chain fixture assignment.
+var expectedCleanReplacement = CutProjectDxfWorkspaceCodec.Create(
+    newSourceDxf, projectWithDxf.Sheet,
+    new SheetLineAssignmentRegister(),
+    new SheetUShapeAssignmentRegister(),
+    new SheetChainAssignmentRegister(),
+    new SheetMixedChainAssignmentRegister());
+Assert(resetRoundtrip.DxfWorkspace!.LineAnnotationsJson ==
+           expectedCleanReplacement.LineAnnotationsJson &&
+       resetRoundtrip.DxfWorkspace!.MixedAnnotationsJson ==
+           expectedCleanReplacement.MixedAnnotationsJson,
+    "Source replacement clears all four DXF technology registers, not only mixed chains");
+
+// A DXF scalar field with duplicate group codes is ambiguous and must never
+// overwrite a previously valid embedded DXF project on confirmed replacement.
+var ambiguousReplacement = newSourceDxf.Replace(
+    "40\n20\n50\n270", "40\n20\n40\n21\n50\n270");
+Assert(ambiguousReplacement != newSourceDxf,
+    "Duplicate DXF radius fixture must differ from valid source");
+var ambiguousReplacementRefused = false;
+try
+{
+    _ = CutProjectDxfWorkspaceCodec.ReplaceSource(
+        projectWithDxf, ambiguousReplacement, discardExistingAssignments: true);
+}
+catch (FormatException) { ambiguousReplacementRefused = true; }
+Assert(ambiguousReplacementRefused &&
+       projectWithDxf.DxfWorkspace!.SourceAsciiDxf == bundledAsciiDxf,
+    "Ambiguous duplicate scalar groups reject entire replacement without mutation");
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
