@@ -4267,4 +4267,81 @@ Assert(SheetTechnologyOverlapReview.Inspect(
     noOldStraight, reloadedMixed).Count == 0,
     "A restored mixed chain can safely coexist with empty legacy registries");
 
+// A1/B1: one project file preserves the exact millimetre DXF source and
+// both preview-technology registers, with old projects still readable.
+var bundledAsciiDxf =
+    "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+    "0\nSECTION\n2\nENTITIES\n" +
+    "0\nLINE\n8\nMIXED\n10\n20\n20\n40\n11\n60\n21\n40\n" +
+    "0\nARC\n8\nMIXED\n10\n60\n20\n60\n40\n20\n50\n270\n51\n0\n" +
+    "0\nLINE\n8\nMIXED\n10\n80\n20\n60\n11\n80\n21\n110\n" +
+    "0\nENDSEC\n0\nEOF\n";
+var bundleSource = DxfReader.Parse(bundledAsciiDxf);
+var bundleMixed = new SheetMixedChainAssignmentRegister();
+var bundleAnnotation = new SheetMixedChainAnnotation(
+    1, SheetOperationKind.BendReference,
+    SheetLineProcessingMode.SurfaceScore);
+Assert(bundleMixed.Assign(bundleAnnotation, bundleSource.Shapes,
+    mixedOpenSheet).IsValid, "Mixed project fixture accepts one analytic ARC chain");
+var bundle = CutProjectDxfWorkspaceCodec.Create(
+    bundledAsciiDxf, mixedOpenSheet, new SheetLineAssignmentRegister(),
+    new SheetUShapeAssignmentRegister(), new SheetChainAssignmentRegister(),
+    bundleMixed);
+var projectWithDxf = new CutProject(CutProject.CurrentFormatVersion,
+    "DXF technology project", mixedOpenSheet,
+    [new Part("Bracket", 30, 40, 1)], "Steel", 2, bundle);
+var projectRoundtrip = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(projectWithDxf));
+Assert(projectRoundtrip.DxfWorkspace is not null &&
+    projectRoundtrip.Sheet == mixedOpenSheet,
+    "Versioned project JSON embeds the optional DXF workspace");
+var recoveredBundle = CutProjectDxfWorkspaceCodec.Load(
+    projectRoundtrip.DxfWorkspace!, mixedOpenSheet);
+Assert(recoveredBundle.Document.Shapes.Count == 3 &&
+    recoveredBundle.MixedChains.TryGet(1, out var recoveredMixedAnnotation) &&
+    recoveredMixedAnnotation == bundleAnnotation &&
+    !recoveredBundle.MixedChains.CanGenerateMachineCommands,
+    "Project reopen revalidates and restores exact DXF mixed annotations");
+var plainProject = CutProject.CreateDefault();
+var plainCopy = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(plainProject));
+Assert(plainCopy.DxfWorkspace is null,
+    "Existing project files without DXF workspace remain compatible");
+bool RejectProject(CutProject changed)
+{
+    try { CutProjectSerializer.Serialize(changed); return false; }
+    catch (FormatException) { return true; }
+}
+Assert(RejectProject(projectWithDxf with
+{
+    DxfWorkspace = bundle with {
+        SourceAsciiDxf = bundledAsciiDxf.Replace(
+            "40\n20\n50\n270", "40\n21\n50\n270")
+    }
+}), "Changing embedded source ARC radius rejects stale project technology");
+Assert(RejectProject(projectWithDxf with
+{
+    DxfWorkspace = bundle with {
+        SourceAsciiDxf = bundledAsciiDxf.Replace("$INSUNITS\n70\n4", "$INSUNITS\n70\n1")
+    }
+}), "DXF without declared millimetre units cannot be embedded");
+var overlappingBundleLine = new SheetLineAssignmentRegister();
+var bundledLine = (DxfLine)bundleSource.Shapes[0];
+Assert(overlappingBundleLine.Assign(0, bundledLine.Start, bundledLine.End,
+    new SheetLineOperation(SheetOperationKind.OpenThroughCut,
+        bundledLine.Start, bundledLine.End,
+        Processing: SheetLineProcessingMode.ThroughCut),
+    mixedOpenSheet).IsValid, "A conflicting legacy LINE is valid in isolation");
+bool rejectedBundledCollision = false;
+try
+{
+    CutProjectDxfWorkspaceCodec.Create(
+        bundledAsciiDxf, mixedOpenSheet, overlappingBundleLine,
+        new SheetUShapeAssignmentRegister(),
+        new SheetChainAssignmentRegister(), bundleMixed);
+}
+catch (FormatException) { rejectedBundledCollision = true; }
+Assert(rejectedBundledCollision,
+    "Project cannot embed conflicting legacy LINE and mixed curve assignments");
+
 Console.WriteLine("AI CutPro core checks passed.");
