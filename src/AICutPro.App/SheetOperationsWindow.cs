@@ -18,6 +18,7 @@ public sealed class SheetOperationsWindow : Window
     private readonly ComboBox _sourceLine;
     private readonly IReadOnlyList<DxfLine> _dxfLines;
     private readonly Sheet _sheet;
+    private readonly SheetLineAssignmentRegister _assignments = new();
     private readonly TextBox _startX, _startY, _endX, _endY;
     private readonly TextBox _startInset, _endInset, _cut, _skip;
     private readonly TextBlock _status;
@@ -128,6 +129,22 @@ public sealed class SheetOperationsWindow : Window
         root.Children.Add(_kind);
         root.Children.Add(fields);
         root.Children.Add(preview);
+        var assign = new Button { Content = "Назначить операцию выбранной DXF LINE (сеанс)" };
+        assign.Click += (_, _) => AssignCurrentLine();
+        root.Children.Add(assign);
+        var clear = new Button { Content = "Снять назначение с DXF LINE" };
+        clear.Click += (_, _) =>
+        {
+            if (_sourceLine.SelectedIndex <= 0)
+            {
+                _status.Text = "Сначала выберите импортированную DXF LINE.";
+                return;
+            }
+            _assignments.Remove(_sourceLine.SelectedIndex - 1);
+            _status.Text = "Назначение снято. DXF не изменён. " +
+                $"Назначено линий: {_assignments.Count}.";
+        };
+        root.Children.Add(clear);
         root.Children.Add(_status);
         root.Children.Add(new ScrollViewer
         {
@@ -156,10 +173,68 @@ public sealed class SheetOperationsWindow : Window
         _startY.Text = line.Start.Y.ToString("R", CultureInfo.InvariantCulture);
         _endX.Text = line.End.X.ToString("R", CultureInfo.InvariantCulture);
         _endY.Text = line.End.Y.ToString("R", CultureInfo.InvariantCulture);
+        if (_assignments.TryGet(selected - 1, out var stored) && stored is not null)
+        {
+            _kind.SelectedIndex = stored.Kind switch
+            {
+                SheetOperationKind.OpenThroughCut => 0,
+                SheetOperationKind.PerforatedCut => 1,
+                SheetOperationKind.BendReference => 2,
+                SheetOperationKind.Marking => 3,
+                _ => -1
+            };
+            _startInset.Text = stored.StartInsetMm.ToString("R", CultureInfo.InvariantCulture);
+            _endInset.Text = stored.EndInsetMm.ToString("R", CultureInfo.InvariantCulture);
+            _cut.Text = stored.CutLengthMm.ToString("R", CultureInfo.InvariantCulture);
+            _skip.Text = stored.SkipLengthMm.ToString("R", CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            _kind.SelectedIndex = 0;
+            _startInset.Text = "5";
+            _endInset.Text = "5";
+            _cut.Text = "3";
+            _skip.Text = "2";
+        }
         RenderPreview();
         _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
             $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
             $"X {line.End.X:0.###}, Y {line.End.Y:0.###}. " + _status.Text;
+    }
+
+    private void AssignCurrentLine()
+    {
+        var index = _sourceLine.SelectedIndex - 1;
+        if (index < 0 || index >= _dxfLines.Count)
+        {
+            _status.Text = "Сначала выберите импортированную DXF LINE.";
+            return;
+        }
+        if (!(Number(_startX, out var sx) && Number(_startY, out var sy)
+            && Number(_endX, out var ex) && Number(_endY, out var ey)
+            && Number(_startInset, out var a) && Number(_endInset, out var b)
+            && Number(_cut, out var cut) && Number(_skip, out var skip)))
+        {
+            _status.Text = "Назначение отклонено: нужны числовые параметры.";
+            return;
+        }
+        var kind = _kind.SelectedIndex switch
+        {
+            0 => SheetOperationKind.OpenThroughCut,
+            1 => SheetOperationKind.PerforatedCut,
+            2 => SheetOperationKind.BendReference,
+            3 => SheetOperationKind.Marking,
+            _ => SheetOperationKind.Unassigned
+        };
+        if (kind != SheetOperationKind.PerforatedCut)
+            cut = skip = 0;
+        var imported = _dxfLines[index];
+        var result = _assignments.Assign(index, imported.Start, imported.End,
+            new(kind, new(sx, sy), new(ex, ey), a, b, cut, skip), _sheet);
+        _status.Text = result.IsValid
+            ? $"Операция {kind} назначена DXF LINE №{index + 1}. " +
+              $"Назначено линий: {_assignments.Count}. Только текущий сеанс; файл DXF не изменён, резка запрещена."
+            : "Назначение отклонено: " + string.Join("; ", result.Issues);
     }
 
     private static TextBox Field(string text) => new() { Text = text, Width = 112 };
