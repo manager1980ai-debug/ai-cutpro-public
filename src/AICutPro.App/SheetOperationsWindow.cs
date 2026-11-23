@@ -23,7 +23,7 @@ public sealed class SheetOperationsWindow : Window
     private readonly Sheet _sheet;
     private readonly SheetLineAssignmentRegister _assignments = new();
     private readonly TextBox _startX, _startY, _endX, _endY;
-    private readonly TextBox _startInset, _endInset, _cut, _skip;
+    private readonly TextBox _startInset, _endInset, _cut, _skip, _uHeight;
     private readonly TextBlock _status;
     private readonly Canvas _drawing;
 
@@ -92,6 +92,7 @@ public sealed class SheetOperationsWindow : Window
         _endInset = Field("5");
         _cut = Field("3");
         _skip = Field("2");
+        _uHeight = Field("20");
         _status = new TextBlock
         {
             Text = "Выберите назначение и нажмите «Показать предпросмотр».",
@@ -165,6 +166,17 @@ public sealed class SheetOperationsWindow : Window
         root.Children.Add(_processing);
         root.Children.Add(fields);
         root.Children.Add(preview);
+        var uOptions = new StackPanel { Spacing = 4 };
+        uOptions.Children.Add(new TextBlock
+        {
+            Text = "П-образная прорезь: выберите горизонтальную DXF LINE как основание, высота вверх, мм",
+            TextWrapping = TextWrapping.Wrap
+        });
+        uOptions.Children.Add(_uHeight);
+        var uPreview = new Button { Content = "Показать П-образную прорезь" };
+        uPreview.Click += (_, _) => RenderUPreview();
+        uOptions.Children.Add(uPreview);
+        root.Children.Add(uOptions);
         var assign = new Button { Content = "Назначить операцию выбранной DXF LINE (сеанс)" };
         assign.Click += (_, _) => AssignCurrentLine();
         root.Children.Add(assign);
@@ -410,6 +422,70 @@ public sealed class SheetOperationsWindow : Window
             ? $"Операция {kind} назначена DXF LINE №{index + 1}. " +
               $"Назначено линий: {_assignments.Count}. Только текущий сеанс; файл DXF не изменён, резка запрещена."
             : "Назначение отклонено: " + string.Join("; ", result.Issues);
+    }
+
+    private void RenderUPreview()
+    {
+        if (_sourceLine.SelectedIndex <= 0 || _sourceLine.SelectedIndex > _dxfLines.Count
+            || !Number(_uHeight, out var height))
+        {
+            _status.Text = "Выберите DXF LINE-основание и числовую высоту П-образной прорези.";
+            return;
+        }
+        var selected = _dxfLines[_sourceLine.SelectedIndex - 1];
+        if (Math.Abs(selected.Start.Y - selected.End.Y) > 1e-8)
+        {
+            _status.Text = "П-образный шаблон пока поддерживает только горизонтальную DXF LINE.";
+            return;
+        }
+        var treatment = SelectedProcessing();
+        // For this specific multi-edge template the base must have an
+        // explicit treatment, never infer a cutting mode from line style.
+        if (treatment == SheetLineProcessingMode.AutoLegacy)
+        {
+            _status.Text = "Выберите способ обработки основания: без резки, надрез, сквозной или Cut/Skip.";
+            return;
+        }
+        if (!Number(_cut, out var cut) || !Number(_skip, out var skip))
+        {
+            _status.Text = "Укажите числовые параметры Cut/Skip.";
+            return;
+        }
+        var result = SheetUShapedPreset.Inspect(
+            _sheet, Math.Min(selected.Start.X, selected.End.X),
+            selected.Start.Y, Math.Abs(selected.End.X - selected.Start.X),
+            height, treatment, cut, skip);
+        if (!result.IsValid)
+        {
+            _status.Text = "П-образный предпросмотр отклонён: " +
+                string.Join("; ", result.Issues);
+            return;
+        }
+        _drawing.Children.Clear();
+        var rectangle = new Rectangle
+        {
+            Width = 480, Height = 240, Stroke = Brushes.SlateGray,
+            StrokeThickness = 2, Fill = Brushes.Transparent
+        };
+        Canvas.SetLeft(rectangle, 20);
+        Canvas.SetTop(rectangle, 15);
+        _drawing.Children.Add(rectangle);
+        var scale = Math.Min(480 / _sheet.WidthMm, 240 / _sheet.HeightMm);
+        foreach (var segment in result.Segments)
+        {
+            _drawing.Children.Add(new Line
+            {
+                StartPoint = new Point(20 + segment.Start.X * scale,
+                    255 - segment.Start.Y * scale),
+                EndPoint = new Point(20 + segment.End.X * scale,
+                    255 - segment.End.Y * scale),
+                Stroke = segment.IsCut ? Brushes.IndianRed : Brushes.SteelBlue,
+                StrokeThickness = segment.IsCut ? 3 : 2
+            });
+        }
+        _status.Text = "П-образный предпросмотр: 3 стороны реза, " +
+            "четвёртая сторона по выбранному способу обработки. " +
+            "Нет проверки прочности сгиба, нет CAM и управления станком.";
     }
 
     private SheetLineProcessingMode SelectedProcessing()
