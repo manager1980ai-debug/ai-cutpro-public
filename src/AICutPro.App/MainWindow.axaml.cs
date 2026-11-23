@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private DxfPreviewHistory? _dxfHistory;
     private IReadOnlyList<DxfDiagnosticFinding> _dxfDiagnostics = [];
     private int? _selectedPlacement;
+    private int? _selectedDxfLine;
     private double _zoom = 1;
     private double _panX, _panY;
     private double _viewScale, _viewOx, _viewOy;
@@ -90,7 +91,18 @@ public partial class MainWindow : Window
     {
         if (_dxfPreview is not null)
         {
-            SelectedPartText.Text = "DXF: просмотр геометрии. Выбор и редактор отдельных CAD-профилей пока не реализованы.";
+            var lines = _dxfPreview.Shapes.OfType<DxfLine>().ToArray();
+            if (_selectedDxfLine is int lineIndex && lineIndex >= 0 && lineIndex < lines.Length)
+            {
+                var line = lines[lineIndex];
+                SelectedPartText.Text = $"DXF LINE №{lineIndex + 1}, слой {line.Layer}\\n" +
+                    $"Начало X {line.Start.X:0.###}, Y {line.Start.Y:0.###} мм\\n" +
+                    $"Конец X {line.End.X:0.###}, Y {line.End.Y:0.###} мм\\n" +
+                    "Выберите «Технологические линии (предпросмотр)» для назначения операции; резка запрещена.";
+            }
+            else
+                SelectedPartText.Text = "DXF: щёлкните по прямой LINE, чтобы выбрать её. " +
+                    "Редактор прочих CAD-сущностей пока не реализован.";
             return;
         }
         if (_selectedPlacement is not int index || index < 0 || index >= _result.Placements.Count)
@@ -212,6 +224,7 @@ public partial class MainWindow : Window
         _zoom = 1;
         _panX = _panY = 0;
         _selectedPlacement = null;
+        _selectedDxfLine = null;
     }
 
     private void CanvasPointerWheelChanged(object? sender, PointerWheelEventArgs e)
@@ -239,7 +252,27 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        if (!current.Properties.IsLeftButtonPressed || _dxfPreview is not null) return;
+        if (!current.Properties.IsLeftButtonPressed) return;
+        if (_dxfPreview is not null)
+        {
+            var lines = _dxfPreview.Shapes.OfType<DxfLine>().ToArray();
+            // Screen coordinates use the current zoom/pan and DXF Y direction.
+            // Selection is conservative: no click near a line means no hit.
+            var pt = current.Position;
+            if (!double.IsFinite(_viewScale) || _viewScale <= 0) return;
+            var modelX = (pt.X - _viewOx) / _viewScale;
+            var modelY = (pt.Y - _viewOy) / (_viewInvertsY ? -_viewScale : _viewScale);
+            _selectedDxfLine = DxfLinePicker.Pick(
+                lines, new Point2(modelX, modelY), 7.0 / _viewScale,
+                ambiguityToleranceMm: 1.0 / _viewScale);
+            UpdatePartCard();
+            StatusText.Text = _selectedDxfLine is int hit
+                ? $"Выбрана DXF LINE №{hit + 1}, слой {lines[hit].Layer}. Редактирование исходного файла не выполнялось."
+                : "DXF LINE не выбрана: щёлкните ближе к одной прямой, вдали от пересечений.";
+            RenderSheet();
+            e.Handled = true;
+            return;
+        }
         var pt = current.Position;
         _selectedPlacement = null;
         for (var i = _result.Placements.Count - 1; i >= 0; i--)
@@ -313,22 +346,24 @@ public partial class MainWindow : Window
         double X(double x) => ScreenX(x);
         double Y(double y) => ScreenY(y);
         var stroke = Brush.Parse("#75D2FF");
-        void AddLine(Point2 a, Point2 b)
+        void AddLine(Point2 a, Point2 b, bool selected = false)
         {
             SheetCanvas.Children.Add(new Line
             {
                 StartPoint = new Avalonia.Point(X(a.X), Y(a.Y)),
                 EndPoint = new Avalonia.Point(X(b.X), Y(b.Y)),
-                Stroke = stroke,
-                StrokeThickness = 1.6
+                Stroke = selected ? Brush.Parse("#FFD36B") : stroke,
+                StrokeThickness = selected ? 4 : 1.6
             });
         }
+        var currentLineIndex = 0;
         foreach (var shape in _dxfPreview.Shapes)
         {
             switch (shape)
             {
                 case DxfLine line:
-                    AddLine(line.Start, line.End);
+                    AddLine(line.Start, line.End, _selectedDxfLine == currentLineIndex);
+                    currentLineIndex++;
                     break;
                 case DxfArc arc:
                     var arcPoints = DxfArcPreview.Sample(arc);
@@ -361,7 +396,7 @@ public partial class MainWindow : Window
 
     private void ShowSheetOperationsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        new SheetOperationsWindow(_dxfPreview, _workspace.MaterialSheet).Show();
+        new SheetOperationsWindow(_dxfPreview, _workspace.MaterialSheet, _selectedDxfLine).Show();
         StatusText.Text = _dxfPreview is null
             ? "Открыт демонстрационный предпросмотр технологических линий. Резка и CAM не разрешены."
             : "Открыт предпросмотр технологических линий импортированного DXF. Исходник не изменяется; резка запрещена.";
