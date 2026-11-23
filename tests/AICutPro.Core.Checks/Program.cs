@@ -3555,4 +3555,59 @@ Assert(restoredAnnotations.Count == 1 &&
     restoredAnnotations.TryGet(1, out restoredBend) && restoredBend == bendAnnotation,
     "All failed sidecar restores retain prior accepted annotations");
 
+// B1.2-06: drafting presets are deterministic, validated, and never CAM.
+var presetSheet = new Sheet(200, 100);
+var presetStart = new Point2(15, 35);
+var presetEnd = new Point2(180, 35);
+foreach (var preset in Enum.GetValues<SheetLinePreset>())
+{
+    var operation = SheetLinePresetLibrary.Create(
+        preset, presetStart, presetEnd, presetSheet);
+    var preview = SheetOperationPlanner.InspectOpenLine(operation, presetSheet);
+    Assert(preview.IsValid && !preview.CanGenerateMachineCommands
+        && operation.Start == presetStart && operation.End == presetEnd,
+        "All open-line presets retain imported coordinates and preview-only gate");
+}
+var insetPreset = SheetLinePresetLibrary.Create(
+    SheetLinePreset.InsetThroughCut, presetStart, presetEnd, presetSheet);
+Assert(insetPreset.StartInsetMm == 5 && insetPreset.EndInsetMm == 5
+    && insetPreset.Processing == SheetLineProcessingMode.ThroughCut,
+    "Free-edge preset trims 5 mm at both endpoints without editing CAD");
+var bendPerforationPreset = SheetLinePresetLibrary.Create(
+    SheetLinePreset.BendAlternatingCutSkip, presetStart, presetEnd, presetSheet);
+var bendPerforationSegments = SheetOperationPlanner.InspectOpenLine(
+    bendPerforationPreset, presetSheet).Segments;
+Assert(bendPerforationPreset.Kind == SheetOperationKind.BendReference
+    && bendPerforationSegments.Any(x => x.IsCut)
+    && bendPerforationSegments.Any(x => !x.IsCut),
+    "Bend preset supports through-perforation with retained bridges");
+bool RejectPreset(SheetLinePreset preset, Point2 start, Point2 end,
+    double insetA = 5, double insetB = 5, double cutMm = 3, double skipMm = 2)
+{
+    try
+    {
+        SheetLinePresetLibrary.Create(
+            preset, start, end, presetSheet, insetA, insetB, cutMm, skipMm);
+        return false;
+    }
+    catch (FormatException) { return true; }
+}
+Assert(RejectPreset(SheetLinePreset.InsetThroughCut,
+    presetStart, presetEnd, 100, 100),
+    "Inset template refuses to erase entire line");
+Assert(RejectPreset(SheetLinePreset.AlternatingCutSkip,
+    presetStart, presetEnd, 5, 5, 0, 2),
+    "Cut/skip template refuses zero-length cut");
+Assert(RejectPreset(SheetLinePreset.BendAlternatingCutSkip,
+    new Point2(-1, 0), presetEnd),
+    "Bend-perforation template refuses endpoints outside sheet");
+bool rejectedUnknownPreset = false;
+try
+{
+    SheetLinePresetLibrary.Create(
+        (SheetLinePreset)999, presetStart, presetEnd, presetSheet);
+}
+catch (ArgumentOutOfRangeException) { rejectedUnknownPreset = true; }
+Assert(rejectedUnknownPreset, "Unknown preset ID fails closed");
+
 Console.WriteLine("AI CutPro core checks passed.");
