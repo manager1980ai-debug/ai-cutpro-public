@@ -4026,4 +4026,47 @@ Assert(!crossingRegistry.Assign(
     crossingImported, chainSheet).IsValid && crossingRegistry.Count == 0,
     "An invalid crossing cannot be stored as a saved chain");
 
+// B1: display-only inspection of exact DXF ARC and open bulged LWPOLYLINE.
+var curvedSheet = new Sheet(200, 120);
+var curvedArc = new DxfArc("CURVES", new Point2(60, 50), 20, 0, 90);
+var arcDisplay = DxfOpenCurveInspector.Inspect(curvedArc, curvedSheet);
+Assert(arcDisplay.IsValid && arcDisplay.DisplayVertices.Count > 2 &&
+    Math.Abs(arcDisplay.SourceLengthMm - 10 * Math.PI) < 1e-8 &&
+    !arcDisplay.CanGenerateMachineCommands,
+    "ARC length remains analytic; sampled chords are display only");
+var positiveBulge = new DxfBulgedPolyline(
+    "CURVES", [new Point2(20, 20), new Point2(60, 20)],
+    [1d, 0d], false);
+var bulgeDisplay = DxfOpenCurveInspector.Inspect(
+    positiveBulge, curvedSheet);
+Assert(bulgeDisplay.IsValid && bulgeDisplay.DisplayVertices.Count > 3 &&
+    Math.Abs(bulgeDisplay.SourceLengthMm - 20 * Math.PI) < 1e-8,
+    "Positive semicircle bulge uses analytic arc length");
+var negativeBulge = positiveBulge with { Bulges = [-1d, 0d] };
+Assert(DxfOpenCurveInspector.Inspect(negativeBulge, curvedSheet).IsValid,
+    "Negative bulge supports opposite sweep");
+var mixedBulge = new DxfBulgedPolyline("CURVES",
+    [new Point2(20, 30), new Point2(60, 30),
+     new Point2(90, 30)], [0d, 0.5d, 0d], false);
+Assert(DxfOpenCurveInspector.Inspect(mixedBulge, curvedSheet).IsValid,
+    "Mixed straight and curved open polylines preview without cutting");
+Assert(!DxfOpenCurveInspector.Inspect(
+    new DxfArc("CURVES", new Point2(190, 90), 30, 0, 90),
+    curvedSheet).IsValid,
+    "Curved preview rejects points outside sheet bounds");
+Assert(!DxfOpenCurveInspector.Inspect(
+    new DxfArc("CURVES", new Point2(50, 50), 10, 0, 0),
+    curvedSheet).IsValid,
+    "Ambiguous zero/full sweep ARC refused");
+Assert(!DxfOpenCurveInspector.Inspect(
+    positiveBulge with { Closed = true }, curvedSheet).IsValid,
+    "Closed bulged contour is not an open-curve operation");
+Assert(!DxfOpenCurveInspector.Inspect(
+    curvedArc, curvedSheet, maximumChordErrorMm: 0).IsValid,
+    "Invalid display tolerance refused");
+Assert(!DxfOpenCurveInspector.Inspect(
+    new DxfArc("CURVES", new Point2(60, 50), 10000, 0, 359),
+    new Sheet(30000, 30000), maximumChordErrorMm: 0.001).IsValid,
+    "Unbounded display sampling is refused instead of overallocating");
+
 Console.WriteLine("AI CutPro core checks passed.");
