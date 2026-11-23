@@ -66,6 +66,8 @@ public static class SheetLineAssignmentSidecar
         foreach (var annotation in chainItems.Values)
             if (!chainValidator.Assign(annotation, lines, sheet).IsValid)
                 throw new FormatException("Cannot export invalid open-chain annotation.");
+        RejectOverlappingChainTechnology(
+            lines, assignments.Keys, uAnnotations.Keys, chainItems.Values);
         var payload = new Payload(CurrentVersion, sheet.WidthMm, sheet.HeightMm,
             lines.Select(x => new LineIdentity(x.Layer, x.Start, x.End)).ToArray(),
             assignments.OrderBy(x => x.Key)
@@ -145,10 +147,32 @@ public static class SheetLineAssignmentSidecar
                 !stagedChains.Assign(annotation, lines, sheet).IsValid)
                 throw new FormatException("Saved open-chain annotation failed validation.");
         }
+        RejectOverlappingChainTechnology(
+            lines, staged.Snapshot().Keys, stagedU.Snapshot().Keys,
+            stagedChains.Snapshot().Values);
         // Commit only after ALL annotation categories pass validation.
         register.ReplaceValidated(staged.Snapshot());
         uShapes?.ReplaceValidated(stagedU.Snapshot());
         chains?.ReplaceValidated(stagedChains.Snapshot());
+    }
+
+    private static void RejectOverlappingChainTechnology(
+        IReadOnlyList<DxfLine> lines, IEnumerable<int> lineAssignments,
+        IEnumerable<int> uShapeAnchors, IEnumerable<SheetChainAnnotation> chains)
+    {
+        var occupied = new HashSet<int>(lineAssignments);
+        occupied.UnionWith(uShapeAnchors);
+        foreach (var annotation in chains)
+        {
+            var component = DxfOpenLineChainBuilder.Build(
+                lines, annotation.SelectedLineIndex);
+            if (!component.IsValid)
+                throw new FormatException("Saved open-chain geometry is ambiguous.");
+            foreach (var member in component.SourceIndices)
+                if (!occupied.Add(member))
+                    throw new FormatException(
+                        "Open chain overlaps another assigned technological operation.");
+        }
     }
 
     private static void CheckDocument(IReadOnlyList<DxfLine> lines, Sheet sheet)
