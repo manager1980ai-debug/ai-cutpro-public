@@ -444,7 +444,10 @@ def probe_selected_dxf_line(executable):
                 break
             time.sleep(0.2)
         else:
-            raise RuntimeError("Imported ARC was not rendered in DXF curve preview")
+            raise RuntimeError(
+                "Imported ARC was not rendered in DXF curve preview; "
+                + "labels=" + repr(labels)
+                + "; combos=" + repr([c.window_text() for c in all_combos]))
         operation_window.close()
         print("GUI DXF LINE/ARC selection PASS: connected LINE and curved ARC previews verified")
     finally:
