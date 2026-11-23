@@ -23,6 +23,7 @@ public sealed class SheetOperationsWindow : Window
     private readonly ComboBox _sourceLine;
     private readonly ComboBox _sourceCurve;
     private readonly IReadOnlyList<DxfShape> _curves;
+    private readonly IReadOnlyList<DxfShape> _allDxfShapes;
     private readonly IReadOnlyList<DxfLine> _dxfLines;
     private readonly Sheet _sheet;
     private readonly SheetLineAssignmentRegister _assignments = new();
@@ -36,7 +37,8 @@ public sealed class SheetOperationsWindow : Window
     public SheetOperationsWindow(DxfImportResult? document = null, Sheet? sheet = null, int? selectedLineIndex = null)
     {
         _sheet = sheet ?? new Sheet(200, 100);
-        _dxfLines = document?.Shapes.OfType<DxfLine>().ToArray() ?? [];
+        _allDxfShapes = document?.Shapes ?? [];
+        _dxfLines = _allDxfShapes.OfType<DxfLine>().ToArray();
         _curves = document?.Shapes.Where(x => x is DxfArc
             or DxfPolyline { Closed: false }
             or DxfBulgedPolyline { Closed: false }).ToArray() ?? [];
@@ -236,6 +238,12 @@ public sealed class SheetOperationsWindow : Window
         };
         curvePreview.Click += (_, _) => RenderOpenCurve();
         root.Children.Add(curvePreview);
+        var mixedPreview = new Button
+        {
+            Content = "Предпросмотр смешанной цепочки LINE/ARC/POLYLINE"
+        };
+        mixedPreview.Click += (_, _) => RenderMixedOpenChain();
+        root.Children.Add(mixedPreview);
         var assignChain = new Button { Content = "Назначить открытую цепочку (группа)" };
         assignChain.Click += (_, _) => AssignConnectedChain();
         root.Children.Add(assignChain);
@@ -658,6 +666,86 @@ public sealed class SheetOperationsWindow : Window
         _status.Text = removed
             ? $"Назначение цепочки удалено. Осталось цепочек: {_chainAssignments.Count}."
             : "Для выбранной DXF LINE нет назначенной цепочки.";
+    }
+
+    private void RenderMixedOpenChain()
+    {
+        var index = _sourceCurve.SelectedIndex - 1;
+        if (index < 0 || index >= _curves.Count)
+        {
+            _status.Text = "Выберите импортированную открытую DXF-кривую.";
+            return;
+        }
+        var selected = -1;
+        for (var i = 0; i < _allDxfShapes.Count; i++)
+            if (ReferenceEquals(_allDxfShapes[i], _curves[index]))
+            {
+                selected = i;
+                break;
+            }
+        if (selected < 0)
+        {
+            _status.Text = "Исходный DXF-объект не найден.";
+            return;
+        }
+        var result = MixedOpenChainAssembler.Assemble(
+            _allDxfShapes, selected, _sheet);
+        if (!result.IsValid || result.AnalyticPath is null)
+        {
+            _status.Text = "Смешанная цепочка отклонена: " +
+                string.Join("; ", result.Issues);
+            return;
+        }
+        var drawingLines = new List<(Point2 Start, Point2 End)>();
+        foreach (var segment in result.AnalyticPath.Segments)
+        {
+            if (segment is PreviewLine line)
+                drawingLines.Add((
+                    new Point2(line.Start.X, line.Start.Y),
+                    new Point2(line.End.X, line.End.Y)));
+            else if (segment is PreviewArc arc)
+            {
+                var startDeg = arc.SweepDegrees >= 0
+                    ? arc.StartDegrees : arc.StartDegrees + arc.SweepDegrees;
+                var endDeg = arc.SweepDegrees >= 0
+                    ? arc.StartDegrees + arc.SweepDegrees : arc.StartDegrees;
+                var points = DxfArcPreview.Sample(new DxfArc(
+                    "DISPLAY", new Point2(arc.Center.X, arc.Center.Y),
+                    arc.RadiusMm, startDeg, endDeg), 5);
+                if (arc.SweepDegrees < 0)
+                    points = points.Reverse().ToArray();
+                for (var i = 1; i < points.Count; i++)
+                    drawingLines.Add((points[i - 1], points[i]));
+            }
+        }
+        if (drawingLines.Count > 10000)
+        {
+            _status.Text = "Смешанная цепочка слишком сложна для предпросмотра.";
+            return;
+        }
+        _drawing.Children.Clear();
+        var border = new Rectangle
+        {
+            Width = 480, Height = 240, Stroke = Brushes.SlateGray,
+            StrokeThickness = 2, Fill = Brushes.Transparent
+        };
+        Canvas.SetLeft(border, 20);
+        Canvas.SetTop(border, 15);
+        _drawing.Children.Add(border);
+        var scale = Math.Min(480 / _sheet.WidthMm, 240 / _sheet.HeightMm);
+        foreach (var item in drawingLines)
+            _drawing.Children.Add(new Line
+            {
+                StartPoint = new Point(20 + item.Start.X * scale,
+                    255 - item.Start.Y * scale),
+                EndPoint = new Point(20 + item.End.X * scale,
+                    255 - item.End.Y * scale),
+                Stroke = Brushes.SteelBlue,
+                StrokeThickness = 2
+            });
+        _status.Text = $"Смешанная цепочка: {result.SourceIndices.Count} DXF-объектов; " +
+            $"длина {result.LengthMm:0.###} мм. Аналитические дуги сохранены. " +
+            "Только изображение: CAM, Cut/Skip и управление станком запрещены.";
     }
 
     private void RenderOpenCurve()
