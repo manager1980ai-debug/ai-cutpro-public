@@ -346,6 +346,10 @@ public sealed class SheetOperationsWindow : Window
             _sourceLine.SelectedIndex = index + 1;
         else
             RenderPreview();
+        if (embeddedWorkspace is not null)
+            _status.Text = $"Из проекта восстановлено: LINE {_assignments.Count}, " +
+                $"П-групп {_uAssignments.Count}, прямых цепочек {_chainAssignments.Count}, " +
+                $"смешанных {_mixedAssignments.Count}. Только предпросмотр.";
     }
 
     private void ApplySelectedLine()
