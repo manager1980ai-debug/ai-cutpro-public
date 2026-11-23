@@ -70,6 +70,44 @@ public static class CutProjectDxfWorkspaceCodec
         return (document, lineAssignments, uAssignments, straightChains, mixedChains);
     }
 
+    /// <summary>
+    /// Safely replaces the source DXF within a project. Annotation transfer across
+    /// changed geometry is never guessed: the operator must explicitly request
+    /// discarding every old annotation. Identical source may retain them.
+    /// Returns a new immutable project only after complete validation.
+    /// </summary>
+    public static CutProject ReplaceSource(
+        CutProject project, string replacementAsciiDxf,
+        bool discardExistingAssignments)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        CutProjectSerializer.Validate(project);
+        ArgumentNullException.ThrowIfNull(replacementAsciiDxf);
+
+        var previous = project.DxfWorkspace;
+        if (previous is not null &&
+            string.Equals(previous.SourceAsciiDxf, replacementAsciiDxf, StringComparison.Ordinal))
+        {
+            // No geometry change: the old valid registers stay bound to the same bytes.
+            return project;
+        }
+        if (previous is not null && !discardExistingAssignments)
+            throw new FormatException(
+                "DXF geometry changed: explicit confirmation to discard all technology assignments is required.");
+
+        // No register is copied or rebound to potentially different entity indices.
+        // An empty export still validates units, source entity set and sheet size.
+        var clean = Create(
+            replacementAsciiDxf, project.Sheet,
+            new SheetLineAssignmentRegister(),
+            new SheetUShapeAssignmentRegister(),
+            new SheetChainAssignmentRegister(),
+            new SheetMixedChainAssignmentRegister());
+        var candidate = project with { DxfWorkspace = clean };
+        CutProjectSerializer.Validate(candidate);
+        return candidate;
+    }
+
     public static void Validate(CutProjectDxfWorkspace workspace, Sheet sheet)
         => _ = Load(workspace, sheet);
 
