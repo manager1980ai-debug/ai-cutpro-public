@@ -308,8 +308,32 @@ def probe_selected_dxf_line(executable):
             raise RuntimeError(
                 "DXF LINE selection did not report imported endpoints: " +
                 repr(details))
+        # Verify the actual editor inputs, not just a success message.
+        # Edit controls are ordered by the four coordinate fields, followed
+        # by the inset/cut/skip parameters in SheetOperationsWindow.
+        edits = operation_window.descendants(control_type="Edit")
+        if len(edits) < 8:
+            raise RuntimeError(
+                f"Expected eight numeric editor fields, found {len(edits)}")
+        coordinate_values = []
+        for field in edits[:4]:
+            try:
+                raw_value = field.iface_value.CurrentValue
+            except Exception as exc:
+                raise RuntimeError(
+                    "Numeric coordinate field has no readable UIA value") from exc
+            coordinate_values.append(raw_value)
+        try:
+            actual = tuple(float(value.replace(",", ".")) for value in coordinate_values)
+        except ValueError as exc:
+            raise RuntimeError(
+                "Selected DXF coordinates not numeric: " + repr(coordinate_values)) from exc
+        if actual != (15.0, 35.0, 180.0, 35.0):
+            raise RuntimeError(
+                "DXF selection did not populate coordinate text boxes: "
+                + repr(coordinate_values))
         operation_window.close()
-        print("GUI DXF LINE selection PASS: CUT_SAMPLE selected, 15/35/180 coordinates populated")
+        print("GUI DXF LINE selection PASS: CUT_SAMPLE selected and numeric editor fields = 15,35 -> 180,35")
     finally:
         launched.terminate()
         try:
