@@ -56,7 +56,8 @@ public sealed class SheetOperationsWindow : Window
         };
         _sourceLine.SelectionChanged += (_, _) =>
         {
-            if (_sourceLine.SelectedIndex is not int selected || selected <= 0)
+            var selected = _sourceLine.SelectedIndex;
+            if (selected <= 0)
                 return;
             if (selected > _dxfLines.Count)
                 return;
