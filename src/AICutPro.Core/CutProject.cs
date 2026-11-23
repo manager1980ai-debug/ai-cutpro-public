@@ -45,7 +45,15 @@ public static class CutProjectSerializer
             throw new FormatException("Файл проекта превышает допустимый размер.");
         if (string.IsNullOrWhiteSpace(json)) throw new FormatException("Файл проекта пуст.");
         CutProject? result;
-        try { result = JsonSerializer.Deserialize<CutProject>(json, Options); }
+        try
+        {
+            // Duplicate keys are ambiguous across JSON readers. Reject them at
+            // every level, including parts and embedded DXF annotations, before
+            // any project state can be adopted by the editor.
+            using var document = JsonDocument.Parse(json);
+            RejectDuplicateProperties(document.RootElement);
+            result = JsonSerializer.Deserialize<CutProject>(json, Options);
+        }
         catch (JsonException ex) { throw new FormatException("Некорректный JSON проекта.", ex); }
         if (result is null) throw new FormatException("Файл проекта не содержит объект.");
         Validate(result);
@@ -73,6 +81,25 @@ public static class CutProjectSerializer
             throw new FormatException("Некорректные параметры материала.");
         if (project.DxfWorkspace is not null)
             CutProjectDxfWorkspaceCodec.Validate(project.DxfWorkspace, project.Sheet);
+    }
+
+    private static void RejectDuplicateProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name))
+                    throw new FormatException("Повторяющееся имя поля в JSON проекта: " + property.Name);
+                RejectDuplicateProperties(property.Value);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                RejectDuplicateProperties(item);
+        }
     }
 
     private static bool Positive(double value) => double.IsFinite(value) && value > 0;
