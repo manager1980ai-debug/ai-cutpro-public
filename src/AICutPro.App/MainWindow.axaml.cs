@@ -2197,12 +2197,44 @@ public partial class MainWindow : Window
         return await dialog.ShowDialog<bool>(this);
     }
 
-    private async void NewProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void NewProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_activeOperationsEditor is { IsVisible: true })
+        {
+            StatusText.Text = "Закройте редактор DXF перед созданием другого проекта.";
+            return;
+        }
+        if (_dxfPreview is not null)
+        {
+            ProjectReplacePanel.IsVisible = true;
+            StatusText.Text = "Подтвердите создание нового проекта или отмените переход.";
+            return;
+        }
+        CreateNewProjectAfterConfirmation();
+    }
+
+    private void CancelNewProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        ProjectReplacePanel.IsVisible = false;
+        StatusText.Text = "Смена проекта отменена. Текущий DXF сохранён в рабочем окне.";
+    }
+
+    private void ConfirmNewProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (!ProjectReplacePanel.IsVisible) return;
+        if (_activeOperationsEditor is { IsVisible: true })
+        {
+            StatusText.Text = "Закройте редактор DXF перед сменой проекта.";
+            return;
+        }
+        ProjectReplacePanel.IsVisible = false;
+        CreateNewProjectAfterConfirmation();
+    }
+
+    private void CreateNewProjectAfterConfirmation()
     {
         try
         {
-            if (!await ConfirmReplaceActiveDxfProjectAsync())
-                return;
             _selectedProjectPart = 0;
             AdoptProject(CutProject.CreateDefault());
             StatusText.Text = "Создан новый редактируемый проект. CAM и резка не доступны.";
