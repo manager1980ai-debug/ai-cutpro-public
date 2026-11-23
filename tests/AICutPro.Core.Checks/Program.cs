@@ -4314,6 +4314,53 @@ Assert(recoveredBundle.Document.Shapes.Count == 3 &&
     recoveredMixedAnnotation == bundleAnnotation &&
     !recoveredBundle.MixedChains.CanGenerateMachineCommands,
     "Project reopen revalidates and restores exact DXF mixed annotations");
+// A1: changed source requires an explicit, all-register reset. Never rebind
+// annotations to entities solely because their indices happen to match.
+var newSourceDxf = bundledAsciiDxf.Replace(
+    "8\nMIXED\n10\n20", "8\nREVISED\n10\n20");
+Assert(newSourceDxf != bundledAsciiDxf,
+    "Replacement fixture must actually alter the source document");
+bool refusedUnconfirmedReplacement = false;
+try
+{
+    _ = CutProjectDxfWorkspaceCodec.ReplaceSource(
+        projectWithDxf, newSourceDxf, discardExistingAssignments: false);
+}
+catch (FormatException) { refusedUnconfirmedReplacement = true; }
+Assert(refusedUnconfirmedReplacement &&
+       projectWithDxf.DxfWorkspace?.SourceAsciiDxf == bundledAsciiDxf,
+    "Changing DXF without explicit annotation reset is refused atomically");
+Assert(ReferenceEquals(
+    CutProjectDxfWorkspaceCodec.ReplaceSource(
+        projectWithDxf, bundledAsciiDxf, discardExistingAssignments: false),
+    projectWithDxf),
+    "Identical DXF bytes retain existing technology assignments");
+var resetProject = CutProjectDxfWorkspaceCodec.ReplaceSource(
+    projectWithDxf, newSourceDxf, discardExistingAssignments: true);
+var resetRoundtrip = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(resetProject));
+var resetRegistries = CutProjectDxfWorkspaceCodec.Load(
+    resetRoundtrip.DxfWorkspace!, resetRoundtrip.Sheet);
+Assert(resetRoundtrip.DxfWorkspace!.SourceAsciiDxf == newSourceDxf &&
+       resetRegistries.Document.Shapes.Count == 3 &&
+       !resetRegistries.MixedChains.TryGet(1, out _) &&
+       resetProject.Name == projectWithDxf.Name &&
+       resetProject.Parts.SequenceEqual(projectWithDxf.Parts) &&
+       projectWithDxf.DxfWorkspace?.SourceAsciiDxf == bundledAsciiDxf,
+    "Confirmed DXF source replacement resets assignments, preserves project fields and original");
+bool refusedInvalidReplacement = false;
+try
+{
+    _ = CutProjectDxfWorkspaceCodec.ReplaceSource(
+        projectWithDxf,
+        newSourceDxf.Replace("$INSUNITS\n70\n4", "$INSUNITS\n70\n1"),
+        discardExistingAssignments: true);
+}
+catch (FormatException) { refusedInvalidReplacement = true; }
+Assert(refusedInvalidReplacement &&
+       projectWithDxf.DxfWorkspace?.SourceAsciiDxf == bundledAsciiDxf,
+    "Even confirmed replacement rejects invalid units without mutating source");
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
