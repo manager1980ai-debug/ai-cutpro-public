@@ -93,6 +93,9 @@ public static class DxfOpenLineChainBuilder
         }
         if (current != endpoints[1] || ordered.Count != component.Count)
             return Fail("DXF chain is not a single open path.");
+        var crossingIssues = OpenChainIntersectionCheck.Inspect(vertices);
+        if (crossingIssues.Count > 0)
+            return new(false, [], [], crossingIssues);
         if (reverseDirection)
         {
             ordered.Reverse();
