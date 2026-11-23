@@ -706,6 +706,35 @@ def probe_embedded_project_file(executable):
             raise RuntimeError("Saved ARC technology was not restored: " + repr(labels))
         editor.close()
         print("GUI embedded DXF project PASS: original geometry and ARC annotation restored")
+        new_buttons = [b for b in window.descendants(control_type="Button")
+                       if b.window_text() == "Создать новый проект"]
+        if len(new_buttons) != 1:
+            raise RuntimeError("New project action absent in embedded DXF session")
+        new_buttons[0].iface_invoke.Invoke()
+        confirmation = None
+        for _ in range(30):
+            matches = [w for w in Desktop(backend="uia").windows()
+                       if w.process_id() == proc.pid and
+                       "Подтверждение смены проекта" in w.window_text()]
+            if matches:
+                confirmation = matches[0]
+                break
+            time.sleep(0.2)
+        if confirmation is None:
+            raise RuntimeError("Embedded DXF replacement confirmation did not appear")
+        cancel = [b for b in confirmation.descendants(control_type="Button")
+                  if b.window_text() == "Остаться в текущем проекте"]
+        if len(cancel) != 1:
+            raise RuntimeError("Project cancellation button missing")
+        cancel[0].iface_invoke.Invoke()
+        for _ in range(20):
+            names = [t.window_text() for t in window.descendants(control_type="Edit")]
+            if "DXF technology project" in names:
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Cancelling project switch erased the embedded project")
+        print("GUI project safety PASS: cancel preserves embedded DXF state")
     finally:
         proc.terminate()
         try:
