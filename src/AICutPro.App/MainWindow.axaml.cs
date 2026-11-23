@@ -650,6 +650,12 @@ public partial class MainWindow : Window
     // round-trip checks. Commit both the preview and its undo snapshot together.
     private void CommitDxfPreview(DxfImportResult verified)
     {
+        // A restored DXF project has identity-bound technological annotations.
+        // Refuse geometry mutations until an explicit migration/rebind flow
+        // can update its source and every dependent assignment together.
+        if (_project.DxfWorkspace is not null)
+            throw new FormatException(
+                "Редактирование геометрии встроенного DXF заблокировано: сначала требуется переназначение технологических операций.");
         if (_dxfHistory is null)
             throw new InvalidOperationException("No active DXF editing session.");
         var rules=_dxfHistory.CurrentAxisRules;
@@ -1875,6 +1881,12 @@ public partial class MainWindow : Window
 
     private void ApplyWorkspaceClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        if (_project.DxfWorkspace is not null ||
+            _activeOperationsEditor is { IsVisible: true })
+        {
+            StatusText.Text = "Габариты DXF-проекта с сохранёнными назначениями нельзя менять отдельно от проекта.";
+            return;
+        }
         if (!ParsePositiveDimension(TableWidthBox.Text, out var tableWidth) ||
             !ParsePositiveDimension(TableHeightBox.Text, out var tableHeight) ||
             !ParsePositiveDimension(SheetWidthBox.Text, out var sheetWidth) ||
