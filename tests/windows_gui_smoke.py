@@ -37,7 +37,12 @@ def probe_project_picker_roundtrip(window):
                 break
             time.sleep(0.2)
         if dialog is None:
-            raise RuntimeError("Windows native file picker did not appear for " + action)
+            main_labels = [t.window_text() for t in window.descendants(control_type="Text")]
+            visible = [(w.window_text(), w.process_id(), w.class_name())
+                       for w in Desktop(backend="uia").windows() if w.is_visible()]
+            raise RuntimeError("Windows native file picker did not appear for " + action +
+                               "; status=" + repr(main_labels[-18:]) +
+                               "; visible=" + repr(visible[-16:]))
         edits = dialog.descendants(control_type="Edit")
         if not edits:
             raise RuntimeError("File picker has no editable filename control: " +
