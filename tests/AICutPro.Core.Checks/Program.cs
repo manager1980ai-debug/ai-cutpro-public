@@ -189,16 +189,16 @@ static bool RejectProject(string content)
     catch (FormatException) { return true; }
 }
 Assert(RejectProject("{invalid"), "Invalid project JSON rejected");
-Assert(RejectProject("{\\"FormatVersion\\":1,\\"FormatVersion\\":2}"),
+Assert(RejectProject("{\"FormatVersion\":1,\"FormatVersion\":2}"),
     "Duplicate top-level project properties rejected before state adoption");
 var validProjectJson = CutProjectSerializer.Serialize(project);
 Assert(RejectProject(validProjectJson.Replace(
-    "\\"ThicknessMm\\": 5",
-    "\\"ThicknessMm\\": 5, \\"ThicknessMm\\": 9")),
+    "\"ThicknessMm\": 5",
+    "\"ThicknessMm\": 5, \"ThicknessMm\": 9")),
     "Duplicate numeric project parameters rejected");
 Assert(RejectProject(validProjectJson.Replace(
-    "\\"Quantity\\": 3",
-    "\\"Quantity\\": 3, \\"Quantity\\": 4")),
+    "\"Quantity\": 3",
+    "\"Quantity\": 3, \"Quantity\": 4")),
     "Duplicate nested part properties rejected");
 
 Assert(RejectProject(JsonSerializer.Serialize(project with { FormatVersion = 99 })),
