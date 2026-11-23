@@ -3705,4 +3705,56 @@ Assert(!uRestored.Assign(uAssigned with { HeightMm = 200 },
 Assert(uRestored.Remove(0) && uRestored.Count == 0,
     "U-shape group can be independently removed");
 
+// B1.2-07: an unclosed DXF LINE is an explicit-intent question,
+// not a directive to auto-close the shape or fire a cutter.
+var intentLines = new DxfLine[]
+{
+    new("OPEN_CUT", new Point2(15, 35), new Point2(180, 35)),
+    new("BEND", new Point2(30, 20), new Point2(100, 20)),
+    new("UNASSIGNED", new Point2(15, 70), new Point2(180, 70))
+};
+var intentSheet = new Sheet(200, 100);
+var intentOperations = new SheetLineAssignmentRegister();
+var intentGroups = new SheetUShapeAssignmentRegister();
+var initialIntent = OpenGeometryIntentReview.Inspect(
+    intentLines, intentSheet, intentOperations, intentGroups);
+Assert(initialIntent.Count == 3 &&
+    initialIntent.All(x => x.Status == OpenLineIntentStatus.NeedsReview &&
+        x.DiagnosticCode == "GEO-3001" && !x.CanGenerateMachineCommands),
+    "All raw open LINEs begin as unassigned, not automatically faulty contours");
+var cutIntent = new SheetLineOperation(
+    SheetOperationKind.OpenThroughCut, intentLines[0].Start,
+    intentLines[0].End, Processing: SheetLineProcessingMode.ThroughCut);
+Assert(intentOperations.Assign(
+    0, intentLines[0].Start, intentLines[0].End,
+    cutIntent, intentSheet).IsValid,
+    "Open cut can be explicitly assigned");
+Assert(intentGroups.Assign(
+    new SheetUShapeAnnotation(1, 25, SheetLineProcessingMode.NoCut),
+    intentLines, intentSheet).IsValid,
+    "Bend base can carry an explicitly assigned U-group");
+var inspectedIntent = OpenGeometryIntentReview.Inspect(
+    intentLines, intentSheet, intentOperations, intentGroups);
+Assert(inspectedIntent[0].Status == OpenLineIntentStatus.AssignedPreview &&
+    inspectedIntent[1].Status == OpenLineIntentStatus.AssignedPreview &&
+    inspectedIntent[2].Status == OpenLineIntentStatus.NeedsReview &&
+    inspectedIntent[2].DiagnosticCode == "GEO-3001",
+    "Diagnostics distinguish explicit open cut, U-shaped group and unresolved geometry");
+Assert(intentGroups.Count == 1 && intentOperations.Count == 1 &&
+    inspectedIntent.All(x => !x.CanGenerateMachineCommands),
+    "Diagnostic inspection is read-only and never authorises machine paths");
+var changedIntent = new DxfLine[]
+{
+    new("OPEN_CUT", new Point2(15, 35), new Point2(179, 35)),
+    intentLines[1], intentLines[2]
+};
+var alteredReview = OpenGeometryIntentReview.Inspect(
+    changedIntent, intentSheet, intentOperations, intentGroups);
+Assert(alteredReview[0].Status == OpenLineIntentStatus.InvalidAssignment &&
+    alteredReview[0].DiagnosticCode == "GEO-3099",
+    "Changed imported geometry invalidates an existing line operation");
+Assert(DxfDiagnosticCatalog.ByCode("GEO-3001").AdviceRu.Contains(
+    "технологических линий", StringComparison.Ordinal),
+    "Open geometry guidance references current assignment interface");
+
 Console.WriteLine("AI CutPro core checks passed.");
