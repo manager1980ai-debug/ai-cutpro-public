@@ -3757,4 +3757,56 @@ Assert(DxfDiagnosticCatalog.ByCode("GEO-3001").AdviceRu.Contains(
     "технологических линий", StringComparison.Ordinal),
     "Open geometry guidance references current assignment interface");
 
+// B1.2-03: continuous processing over an ordered open DXF LINE chain.
+var chainSheet = new Sheet(200, 100);
+var rightAngleChain = new Point2[]
+{
+    new(10, 20), new(60, 20), new(60, 70)
+};
+var chainCutPreview = SheetOpenChainPlanner.Inspect(
+    rightAngleChain, chainSheet, SheetOperationKind.OpenThroughCut,
+    SheetLineProcessingMode.ThroughCut, 5, 10);
+Assert(chainCutPreview.IsValid && chainCutPreview.Segments.Count == 2
+    && chainCutPreview.Segments.All(s => s.IsCut)
+    && chainCutPreview.Segments[0].Start == new Point2(15, 20)
+    && chainCutPreview.Segments[^1].End == new Point2(60, 60)
+    && !chainCutPreview.CanGenerateMachineCommands,
+    "End insets work over the entire two-segment open chain");
+var chainSkipPreview = SheetOpenChainPlanner.Inspect(
+    rightAngleChain, chainSheet, SheetOperationKind.BendReference,
+    SheetLineProcessingMode.PerforatedThroughCut, 0, 0, 30, 10);
+Assert(chainSkipPreview.IsValid
+    && chainSkipPreview.Segments.Any(s => s.IsCut)
+    && chainSkipPreview.Segments.Any(s => !s.IsCut)
+    && chainSkipPreview.Segments.Any(s =>
+        s.Start == new Point2(60, 20) || s.End == new Point2(60, 20)),
+    "Cut/skip phase is preserved across a 90 degree corner");
+Assert(!SheetOpenChainPlanner.Inspect(
+    [new Point2(10, 20), new Point2(60, 20), new Point2(10, 20)],
+    chainSheet, SheetOperationKind.OpenThroughCut,
+    SheetLineProcessingMode.ThroughCut).IsValid,
+    "Closed chain rejected as intentional open path");
+Assert(!SheetOpenChainPlanner.Inspect(
+    [new Point2(10, 20), new Point2(10, 20)],
+    chainSheet, SheetOperationKind.OpenThroughCut,
+    SheetLineProcessingMode.ThroughCut).IsValid,
+    "Degenerate open segment rejected");
+Assert(!SheetOpenChainPlanner.Inspect(
+    [new Point2(-1, 20), new Point2(10, 20)],
+    chainSheet, SheetOperationKind.OpenThroughCut,
+    SheetLineProcessingMode.ThroughCut).IsValid,
+    "Out-of-bounds chain rejected");
+Assert(!SheetOpenChainPlanner.Inspect(
+    rightAngleChain, chainSheet, SheetOperationKind.OpenThroughCut,
+    SheetLineProcessingMode.AutoLegacy).IsValid,
+    "Chain requires explicit processing, not a guessed DXF linetype");
+Assert(!SheetOpenChainPlanner.Inspect(
+    rightAngleChain, chainSheet, SheetOperationKind.PerforatedCut,
+    SheetLineProcessingMode.PerforatedThroughCut, 0, 0, 0, 2).IsValid,
+    "Chain rejects zero cut length");
+Assert(!SheetOpenChainPlanner.Inspect(
+    rightAngleChain, chainSheet, SheetOperationKind.OpenThroughCut,
+    SheetLineProcessingMode.ThroughCut, 100, 1).IsValid,
+    "Chain refuses insets that erase entire path");
+
 Console.WriteLine("AI CutPro core checks passed.");
