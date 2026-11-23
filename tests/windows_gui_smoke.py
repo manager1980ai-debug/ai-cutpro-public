@@ -430,12 +430,11 @@ def probe_selected_dxf_line(executable):
                          if b.window_text() == "Предпросмотр открытой DXF-дуги/полилинии"]
         if len(curve_buttons) != 1:
             raise RuntimeError("ARC/POLYLINE independent preview action missing")
-        all_combos = operation_window.descendants(control_type="ComboBox")
-        if len(all_combos) < 7:
-            raise RuntimeError("Open-curve DXF selector absent")
-        # The open-curve selector is inserted after the processing/chain selectors.
-        all_combos[-1].select(1)
-        curve_buttons[0].iface_invoke.Invoke()
+        pick_curve = [b for b in operation_window.descendants(control_type="Button")
+                      if b.window_text() == "Выбрать первую импортированную DXF-кривую"]
+        if len(pick_curve) != 1:
+            raise RuntimeError("Explicit imported curve selection button missing")
+        pick_curve[0].iface_invoke.Invoke()
         for _ in range(15):
             labels = [x.window_text() for x in
                       operation_window.descendants(control_type="Text")]
@@ -447,7 +446,7 @@ def probe_selected_dxf_line(executable):
             raise RuntimeError(
                 "Imported ARC was not rendered in DXF curve preview; "
                 + "labels=" + repr(labels)
-                + "; combos=" + repr([c.window_text() for c in all_combos]))
+                + "; buttons=" + repr([b.window_text() for b in curve_buttons]))
         operation_window.close()
         print("GUI DXF LINE/ARC selection PASS: connected LINE and curved ARC previews verified")
     finally:
