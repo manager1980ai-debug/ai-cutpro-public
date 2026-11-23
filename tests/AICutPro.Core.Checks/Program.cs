@@ -4361,6 +4361,44 @@ Assert(refusedInvalidReplacement &&
        projectWithDxf.DxfWorkspace?.SourceAsciiDxf == bundledAsciiDxf,
     "Even confirmed replacement rejects invalid units without mutating source");
 
+// A1/B3 fail-closed replacement matrix: malformed input must never alter
+// the active project, and identical geometry must retain exact annotations.
+Assert(ReferenceEquals(
+    CutProjectDxfWorkspaceCodec.ReplaceSource(
+        projectWithDxf, bundledAsciiDxf, discardExistingAssignments: true),
+    projectWithDxf),
+    "Even an explicit reset cannot destroy annotations when DXF is unchanged");
+var malformedReplacements = new[]
+{
+    "",
+    " ",
+    "0\nEOF\n",
+    newSourceDxf.Replace("$INSUNITS\n70\n4", "$INSUNITS\n70\n1"),
+    new string('X', 4_000_001)
+};
+foreach (var invalidSource in malformedReplacements)
+{
+    var rejected = false;
+    try
+    {
+        _ = CutProjectDxfWorkspaceCodec.ReplaceSource(
+            projectWithDxf, invalidSource, discardExistingAssignments: true);
+    }
+    catch (FormatException) { rejected = true; }
+    Assert(rejected &&
+           projectWithDxf.DxfWorkspace?.SourceAsciiDxf == bundledAsciiDxf &&
+           projectWithDxf.DxfWorkspace?.MixedAnnotationsJson == bundle.MixedAnnotationsJson,
+        "Malformed DXF replacement cannot modify source or technology annotations");
+}
+Assert(resetRoundtrip.DxfWorkspace!.MixedAnnotationsJson != bundle.MixedAnnotationsJson,
+    "Replacing geometry must not carry original mixed ARC annotations");
+var resetAgain = CutProjectDxfWorkspaceCodec.ReplaceSource(
+    resetRoundtrip, bundledAsciiDxf, discardExistingAssignments: true);
+Assert(CutProjectDxfWorkspaceCodec.Load(resetAgain.DxfWorkspace!, resetAgain.Sheet)
+       .Document.Shapes.Count == bundleSource.Shapes.Count &&
+       resetAgain.DxfWorkspace!.MixedAnnotationsJson != bundle.MixedAnnotationsJson,
+    "Repeated geometry replacement never resurrects previously discarded assignments");
+
 // B3 synthetic boundary corpus: numerous disjoint open LINE entities at
 // fractional millimetre coordinates. This checks stable DXF project roundtrips,
 // not independent manufacturing/CAM correctness or a real factory file corpus.
