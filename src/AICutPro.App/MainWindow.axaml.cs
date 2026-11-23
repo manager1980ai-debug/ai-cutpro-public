@@ -55,7 +55,32 @@ public partial class MainWindow : Window
         Opened += (_, _) =>
         {
             var args = Environment.GetCommandLineArgs();
-            if (args.Length != 3 || args[1] != "--open-dxf") return;
+            if (args.Length != 3) return;
+            if (args[1] == "--open-project")
+            {
+                try
+                {
+                    var file = new FileInfo(args[2]);
+                    if (file.Length is <= 0 or > 20_000_000)
+                        throw new FormatException("Project file size is invalid.");
+                    var candidate = CutProjectSerializer.Deserialize(
+                        File.ReadAllText(file.FullName));
+                    if (candidate.DxfWorkspace is not null)
+                        throw new FormatException(
+                            "Embedded DXF projects are not yet supported in the main GUI.");
+                    AdoptProject(candidate);
+                    StatusText.Text = $"Проект «{candidate.Name}» открыт: " +
+                        $"{candidate.Parts.Count} деталей, лист " +
+                        $"{candidate.Sheet.WidthMm:0.###} × {candidate.Sheet.HeightMm:0.###} мм.";
+                }
+                catch (Exception ex) when (ex is IOException or FormatException or
+                                           UnauthorizedAccessException or ArgumentException)
+                {
+                    StatusText.Text = "Открытие проекта отклонено: " + ex.Message;
+                }
+                return;
+            }
+            if (args[1] != "--open-dxf") return;
             try
             {
                 var file = new FileInfo(args[2]);
