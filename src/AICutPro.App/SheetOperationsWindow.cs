@@ -111,18 +111,20 @@ public sealed class SheetOperationsWindow : Window
         });
         root.Children.Add(new TextBlock { Text = "Источник линии", FontWeight = FontWeight.SemiBold });
         root.Children.Add(_sourceLine);
-        var selectByNumber = new Button { Content = "Применить DXF LINE №1" };
-        selectByNumber.Click += (_, _) =>
+        var applySource = new Button { Content = "Применить выбранную DXF LINE" };
+        applySource.Click += (_, _) =>
         {
             if (_dxfLines.Count == 0)
             {
                 _status.Text = "В загруженном DXF отсутствуют отдельные объекты LINE.";
                 return;
             }
-            _sourceLine.SelectedIndex = 1;
-            ApplySelectedLine();
+            if (_sourceLine.SelectedIndex <= 0)
+                _sourceLine.SelectedIndex = 1; // also raises SelectionChanged
+            else
+                ApplySelectedLine();
         };
-        root.Children.Add(selectByNumber);
+        root.Children.Add(applySource);
         root.Children.Add(_kind);
         root.Children.Add(fields);
         root.Children.Add(preview);
