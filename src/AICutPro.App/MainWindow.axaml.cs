@@ -2157,12 +2157,52 @@ public partial class MainWindow : Window
         }
     }
 
-    private void NewProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async System.Threading.Tasks.Task<bool> ConfirmReplaceActiveDxfProjectAsync()
+    {
+        if (_activeOperationsEditor is { IsVisible: true })
+        {
+            StatusText.Text = "Закройте редактор назначений DXF перед сменой проекта.";
+            return false;
+        }
+        if (_dxfPreview is null)
+            return true;
+        var dialog = new Window
+        {
+            Title = "AI CutPro | Подтверждение смены проекта",
+            Width = 440,
+            Height = 190,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        var content = new StackPanel { Spacing = 12, Margin = new Thickness(18) };
+        content.Children.Add(new TextBlock
+        {
+            Text = "Текущий DXF-проект может содержать несохранённые назначения. " +
+                   "Продолжить без сохранения текущих изменений?",
+            TextWrapping = TextWrapping.Wrap
+        });
+        var buttons = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 10
+        };
+        var cancel = new Button { Content = "Остаться в текущем проекте" };
+        cancel.Click += (_, _) => dialog.Close(false);
+        var proceed = new Button { Content = "Продолжить без сохранения" };
+        proceed.Click += (_, _) => dialog.Close(true);
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(proceed);
+        content.Children.Add(buttons);
+        dialog.Content = content;
+        return await dialog.ShowDialog<bool>(this);
+    }
+
+    private async void NewProjectClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
         {
-            if (_dxfPreview is not null)
-                throw new FormatException("Открыт DXF. Завершите работу с чертежом перед созданием другого проекта.");
+            if (!await ConfirmReplaceActiveDxfProjectAsync())
+                return;
             _selectedProjectPart = 0;
             AdoptProject(CutProject.CreateDefault());
             StatusText.Text = "Создан новый редактируемый проект. CAM и резка не доступны.";
@@ -2213,8 +2253,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (_dxfPreview is not null || _activeOperationsEditor is { IsVisible: true })
-                throw new FormatException("Закройте текущий DXF и редактор назначений перед открытием другого проекта.");
+            if (!await ConfirmReplaceActiveDxfProjectAsync())
+                return;
             var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
                 Title = "Открыть рабочий проект AI CutPro",
