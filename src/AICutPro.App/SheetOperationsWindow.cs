@@ -18,6 +18,8 @@ public sealed class SheetOperationsWindow : Window
     private readonly ComboBox _kind;
     private readonly ComboBox _processing;
     private readonly ComboBox _preset;
+    private readonly ComboBox _chainDirection;
+    private readonly ComboBox _chainFirstPhase;
     private readonly ComboBox _sourceLine;
     private readonly IReadOnlyList<DxfLine> _dxfLines;
     private readonly Sheet _sheet;
@@ -59,6 +61,24 @@ public sealed class SheetOperationsWindow : Window
                 "Сгиб: только ориентир",
                 "Сгиб: сплошной сквозной рез",
                 "Сгиб: прерывистые прорези"
+            },
+            SelectedIndex = 0
+        };
+        _chainDirection = new ComboBox
+        {
+            ItemsSource = new[]
+            {
+                "Направление цепочки: от меньшего X/Y",
+                "Направление цепочки: обратное"
+            },
+            SelectedIndex = 0
+        };
+        _chainFirstPhase = new ComboBox
+        {
+            ItemsSource = new[]
+            {
+                "Первый участок Cut/Skip: рез",
+                "Первый участок Cut/Skip: пропуск"
             },
             SelectedIndex = 0
         };
@@ -167,6 +187,8 @@ public sealed class SheetOperationsWindow : Window
         root.Children.Add(_processing);
         root.Children.Add(fields);
         root.Children.Add(preview);
+        root.Children.Add(_chainDirection);
+        root.Children.Add(_chainFirstPhase);
         var chainPreview = new Button
         {
             Content = "Предпросмотр связанной цепочки DXF LINE"
@@ -504,7 +526,8 @@ public sealed class SheetOperationsWindow : Window
             _status.Text = "Сначала выберите импортированную DXF LINE.";
             return;
         }
-        var chain = DxfOpenLineChainBuilder.Build(_dxfLines, selected);
+        var chain = DxfOpenLineChainBuilder.Build(
+            _dxfLines, selected, _chainDirection.SelectedIndex == 1);
         if (!chain.IsValid)
         {
             _status.Text = "Цепочка не построена: " + string.Join("; ", chain.Issues);
@@ -528,7 +551,8 @@ public sealed class SheetOperationsWindow : Window
         if (treatment != SheetLineProcessingMode.PerforatedThroughCut)
             cut = skip = 0;
         var result = SheetOpenChainPlanner.Inspect(
-            chain.Vertices, _sheet, kind, treatment, a, b, cut, skip);
+            chain.Vertices, _sheet, kind, treatment, a, b, cut, skip,
+            startWithCut: _chainFirstPhase.SelectedIndex != 1);
         if (!result.IsValid)
         {
             _status.Text = "Цепочка отклонена: " + string.Join("; ", result.Issues);
