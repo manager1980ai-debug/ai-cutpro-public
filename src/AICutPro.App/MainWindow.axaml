@@ -63,6 +63,8 @@
           <TextBox x:Name="DxfUnitsBox" Watermark="1=дюйм, 2=фут, 4=мм, 5=см, 6=м"/>
           <TextBlock Text="Пустое поле: только исходный просмотр, без пересчёта. Единицы не угадываются." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Открыть DXF (предпросмотр)" Click="ImportDxfClicked"/>
+          <Button Content="Заменить DXF проекта (сброс назначений)" Click="ReplaceProjectDxfClicked"/>
+          <TextBlock Text="Замена доступна для открытого проекта со встроенным DXF. Старые технологические назначения сбрасываются только после отдельного подтверждения; при отмене остаются нетронутыми." Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <Button Content="Диагностика DXF (все замечания)" Click="ShowDxfDiagnosticsClicked"/>
           <Button Content="Технологические линии (предпросмотр)" Click="ShowSheetOperationsClicked"/>
           <TextBlock Text="Открытый рез, прерывистые прорези и линия сгиба: пока отдельный редактор-прототип без передачи команд станку." Foreground="#9CB3C9" TextWrapping="Wrap"/>
