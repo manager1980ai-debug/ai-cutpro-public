@@ -188,6 +188,15 @@ public static class MixedOpenChainAssembler
         if (current != ends[1])
             return Fail("Mixed open path does not terminate at its second end.");
 
+        // Validate the actual analytic primitives before any display
+        // sampling. A chordal picture cannot rule out intersections of arcs.
+        var analyticPath = new PreviewPath(ordered, false);
+        var analyticIssues = PreviewContourValidator.ValidateOpen(
+            analyticPath, joinToleranceMm);
+        if (analyticIssues.Count > 0)
+            return Fail("Analytic open-chain geometry rejected: " +
+                string.Join("; ", analyticIssues));
+
         // The original arc primitives are preserved. The bounded display
         // approximation is checked separately and MUST NOT be used for CAM.
         double length = 0;
@@ -247,7 +256,7 @@ public static class MixedOpenChainAssembler
             return Fail("Mixed open chain display intersects itself: " +
                 string.Join("; ", intersections));
         return new(true, sourceIndices.Distinct().ToArray(),
-            new PreviewPath(ordered, false), length, []);
+            analyticPath, length, []);
 
         void Add(int sourceIndex, PreviewSegment segment)
         {
