@@ -68,6 +68,8 @@ public static class SheetOpenChainPlanner
             issues.Add("Insets remove the entire open chain.");
         if (vertices[0] == vertices[^1])
             issues.Add("Closed paths cannot be treated as open chains.");
+        if (issues.Count == 0)
+            issues.AddRange(OpenChainIntersectionCheck.Inspect(vertices));
         if (issues.Count > 0)
             return new(false, kind, [], issues);
 
