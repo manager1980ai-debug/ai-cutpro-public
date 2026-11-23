@@ -4069,4 +4069,20 @@ Assert(!DxfOpenCurveInspector.Inspect(
     new Sheet(30000, 30000), maximumChordErrorMm: 0.001).IsValid,
     "Unbounded display sampling is refused instead of overallocating");
 
+// B1: actual ASCII DXF import, not only synthetic geometry records.
+var importedCurves = DxfReader.Parse(
+    "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+    "0\nSECTION\n2\nENTITIES\n" +
+    "0\nARC\n8\nCURVES\n10\n60\n20\n50\n40\n20\n50\n0\n51\n90\n" +
+    "0\nLWPOLYLINE\n8\nCURVES\n90\n2\n70\n0\n" +
+    "10\n20\n20\n20\n42\n1\n10\n60\n20\n20\n" +
+    "0\nENDSEC\n0\nEOF\n");
+Assert(importedCurves.InsUnits == 4 &&
+    importedCurves.Shapes.Count == 2 &&
+    importedCurves.Shapes[0] is DxfArc &&
+    importedCurves.Shapes[1] is DxfBulgedPolyline &&
+    importedCurves.Shapes.All(shape =>
+        DxfOpenCurveInspector.Inspect(shape, curvedSheet).IsValid),
+    "Real DXF ARC and bulged LWPOLYLINE import to separate safe curved previews");
+
 Console.WriteLine("AI CutPro core checks passed.");
