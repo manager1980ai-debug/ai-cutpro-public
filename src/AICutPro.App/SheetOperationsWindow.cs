@@ -273,6 +273,9 @@ public sealed class SheetOperationsWindow : Window
             savedGroup is not null)
         {
             _uHeight.Text = savedGroup.HeightMm.ToString("R", CultureInfo.InvariantCulture);
+            _processing.SelectedIndex = (int)savedGroup.BaseProcessing;
+            _cut.Text = savedGroup.CutLengthMm.ToString("R", CultureInfo.InvariantCulture);
+            _skip.Text = savedGroup.SkipLengthMm.ToString("R", CultureInfo.InvariantCulture);
         }
         _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
             $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
