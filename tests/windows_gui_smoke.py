@@ -246,6 +246,7 @@ def probe_selected_dxf_line(executable):
         "10\n15\n20\n35\n11\n180\n21\n35\n"
         "0\nLINE\n8\nCUT_SAMPLE\n10\n180\n20\n35\n11\n180\n21\n75\n"
         "0\nARC\n8\nCURVES\n10\n60\n20\n50\n40\n20\n50\n0\n51\n90\n"
+        "0\nLINE\n8\nCURVES\n10\n80\n20\n50\n11\n110\n21\n50\n"
         "0\nLWPOLYLINE\n8\nCURVES\n90\n2\n70\n0\n"
         "10\n20\n20\n20\n42\n1\n10\n60\n20\n20\n"
         "0\nENDSEC\n0\nEOF\n",
@@ -447,8 +448,23 @@ def probe_selected_dxf_line(executable):
                 "Imported ARC was not rendered in DXF curve preview; "
                 + "labels=" + repr(labels)
                 + "; buttons=" + repr([b.window_text() for b in curve_buttons]))
+        mixed_buttons = [b for b in operation_window.descendants(control_type="Button")
+                         if b.window_text() ==
+                         "Предпросмотр смешанной цепочки LINE/ARC/POLYLINE"]
+        if len(mixed_buttons) != 1:
+            raise RuntimeError("Mixed LINE/ARC preview action missing")
+        mixed_buttons[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Смешанная цепочка: 2 DXF-объектов" in value
+                   and "Аналитические дуги сохранены" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Connected imported ARC+LINE was not previewed: " + repr(labels))
         operation_window.close()
-        print("GUI DXF LINE/ARC selection PASS: connected LINE and curved ARC previews verified")
+        print("GUI DXF ARC+LINE mixed preview PASS: analytic curve stays display-only")
     finally:
         launched.terminate()
         try:
