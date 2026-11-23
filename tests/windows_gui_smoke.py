@@ -291,8 +291,20 @@ def probe_selected_dxf_line(executable):
             if not any("CUT_SAMPLE" in item for item in entries):
                 raise RuntimeError("Imported DXF LINE not offered in selector")
             combo[0].collapse()
+        selector = operation_window.descendants(control_type="ComboBox")[0]
+        selector.select(1)
+        for _ in range(15):
+            field_values = [field.window_text() for field in
+                            operation_window.descendants(control_type="Edit")]
+            if "15" in field_values and "35" in field_values and "180" in field_values:
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError(
+                "DXF LINE selection did not populate editable coordinates: " +
+                repr(field_values))
         operation_window.close()
-        print("GUI DXF LINE selection PASS: CUT_SAMPLE present in operation editor")
+        print("GUI DXF LINE selection PASS: CUT_SAMPLE selected, 15/35/180 coordinates populated")
     finally:
         launched.terminate()
         try:
