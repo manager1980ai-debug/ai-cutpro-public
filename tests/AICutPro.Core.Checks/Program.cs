@@ -3465,4 +3465,45 @@ Assert(lineAssignments.Remove(0) && !lineAssignments.TryGet(0, out _)
     && lineAssignments.Count == 1 && !lineAssignments.Remove(0),
     "Removing a line assignment leaves other lines intact");
 
+// B1.2: a bend is functional intent, not an implicit prohibition of through cutting.
+var bendNoCut = new SheetLineOperation(
+    SheetOperationKind.BendReference, new Point2(10, 10), new Point2(90, 10),
+    Processing: SheetLineProcessingMode.NoCut);
+var bendThroughCut = bendNoCut with {
+    Processing = SheetLineProcessingMode.ThroughCut
+};
+var bendPerforated = bendNoCut with {
+    Processing = SheetLineProcessingMode.PerforatedThroughCut,
+    CutLengthMm = 3, SkipLengthMm = 2
+};
+var bendSurface = bendNoCut with {
+    Processing = SheetLineProcessingMode.SurfaceScore
+};
+var bendSheet = new Sheet(100, 100);
+var bendNoCutPreview = SheetOperationPlanner.InspectOpenLine(bendNoCut, bendSheet);
+var bendThroughPreview = SheetOperationPlanner.InspectOpenLine(bendThroughCut, bendSheet);
+var bendPerforatedPreview = SheetOperationPlanner.InspectOpenLine(bendPerforated, bendSheet);
+var bendSurfacePreview = SheetOperationPlanner.InspectOpenLine(bendSurface, bendSheet);
+Assert(bendNoCutPreview.IsValid && bendNoCutPreview.Segments.All(x => !x.IsCut),
+    "Bend location can be annotation only");
+Assert(bendThroughPreview.IsValid && bendThroughPreview.Segments.Count == 1
+    && bendThroughPreview.Segments.All(x => x.IsCut),
+    "Bend intent can explicitly use full through-cut preview");
+Assert(bendPerforatedPreview.IsValid
+    && bendPerforatedPreview.Segments.Any(x => x.IsCut)
+    && bendPerforatedPreview.Segments.Any(x => !x.IsCut),
+    "Bend intent can explicitly use alternating cut and skip");
+Assert(bendSurfacePreview.IsValid && bendSurfacePreview.Segments.All(x => !x.IsCut),
+    "Surface score is not represented as a through cut");
+Assert(!SheetOperationPlanner.InspectOpenLine(
+    bendThroughCut with { CutLengthMm = 3 }, bendSheet).IsValid,
+    "Cut/skip fields are invalid outside perforation treatment");
+Assert(!SheetOperationPlanner.InspectOpenLine(
+    bendNoCut with { Processing = (SheetLineProcessingMode)999 }, bendSheet).IsValid,
+    "Unknown treatment fails closed");
+Assert(!bendThroughPreview.CanGenerateMachineCommands
+    && !bendPerforatedPreview.CanGenerateMachineCommands
+    && !bendSurfacePreview.CanGenerateMachineCommands,
+    "Processing previews never grant machine permission");
+
 Console.WriteLine("AI CutPro core checks passed.");
