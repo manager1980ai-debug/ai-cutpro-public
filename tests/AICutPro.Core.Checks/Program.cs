@@ -3922,8 +3922,7 @@ var sameComponentAlternate = chainAnnotation with { SelectedLineIndex = 1 };
 Assert(!chainRegistry.Assign(sameComponentAlternate, chainImported, chainSheet).IsValid &&
     chainRegistry.Count == 1,
     "Duplicate assignment of the same connected chain is refused");
-var priorV2 = chainJson.Replace("\"Version\":3", "\"Version\":2")
-    .Replace(",\"Chains\":[", ",\"ExtraChains\":[");
+var priorV2 = chainJson.Replace("\"Version\":3", "\"Version\":2");
 Assert(RejectChainRestore(priorV2, chainImported, chainRestored),
     "A legacy version cannot silently contain v3 chain technology");
 
