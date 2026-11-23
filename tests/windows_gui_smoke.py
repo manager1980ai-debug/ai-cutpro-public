@@ -421,7 +421,7 @@ def probe_selected_dxf_line(executable):
         review_buttons[0].iface_invoke.Invoke()
         for _ in range(15):
             labels = [x.window_text() for x in operation_window.descendants(control_type="Text")]
-            if any("Проверка GEO-3001" in value and "не назначено: 2" in value
+            if any("Проверка GEO-3001" in value and "не назначено: 3" in value
                    for value in labels):
                 break
             time.sleep(0.2)
