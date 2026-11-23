@@ -3549,14 +3549,14 @@ Assert(SidecarRejects(sidecarJson, sidecarLines, new Sheet(220, 100)),
     "Sidecar refuses changed sheet dimensions");
 Assert(SidecarRejects("not-json", sidecarLines, sidecarSheet),
     "Sidecar refuses malformed JSON");
-Assert(SidecarRejects(sidecarJson.Replace("\"Version\":2", "\"Version\":999"),
+Assert(SidecarRejects(sidecarJson.Replace("\"Version\":3", "\"Version\":999"),
     sidecarLines, sidecarSheet), "Sidecar refuses unknown schema versions");
 Assert(restoredAnnotations.Count == 1 &&
     restoredAnnotations.TryGet(1, out restoredBend) && restoredBend == bendAnnotation,
     "All failed sidecar restores retain prior accepted annotations");
 
 // Version 1 files contain no U-shape assignments and remain readable.
-var legacyLineSidecar = sidecarJson.Replace("\"Version\":2", "\"Version\":1");
+var legacyLineSidecar = sidecarJson.Replace("\"Version\":3", "\"Version\":1");
 SheetLineAssignmentSidecar.Restore(
     legacyLineSidecar, sidecarLines, sidecarSheet, restoredAnnotations);
 Assert(restoredAnnotations.Count == 1 &&
@@ -3863,5 +3863,68 @@ Assert(reversedInsetPreview.IsValid &&
     reversedInsetPreview.Segments[0].Start == new Point2(60, 65) &&
     reversedInsetPreview.Segments[^1].End == new Point2(20, 20),
     "Reversing chain changes where start and end insets are applied");
+
+// B1.2: sidecar v3 preserves connected LINE groups and refuses stale/ambiguous geometry.
+var chainImported = new DxfLine[]
+{
+    new("SLOT", new Point2(60, 20), new Point2(60, 70)),
+    new("SLOT", new Point2(10, 20), new Point2(60, 20)),
+    new("UNRELATED", new Point2(15, 80), new Point2(30, 80))
+};
+var chainRegistry = new SheetChainAssignmentRegister();
+var chainAnnotation = new SheetChainAnnotation(
+    0, true, SheetOperationKind.BendReference,
+    SheetLineProcessingMode.PerforatedThroughCut,
+    5, 5, 3, 2, false);
+Assert(chainRegistry.Assign(chainAnnotation, chainImported, chainSheet).IsValid
+    && chainRegistry.Count == 1 && !chainRegistry.CanGenerateMachineCommands,
+    "A reversible multi-LINE Cut/Skip annotation can be assigned");
+var chainJson = SheetLineAssignmentSidecar.Export(
+    chainImported, chainSheet, new SheetLineAssignmentRegister(),
+    new SheetUShapeAssignmentRegister(), chainRegistry);
+Assert(chainJson.Contains("\"Version\":3") &&
+    chainJson.Contains("\"Chains\""),
+    "V3 sidecar serializes complete chain assignment");
+var chainRestored = new SheetChainAssignmentRegister();
+SheetLineAssignmentSidecar.Restore(
+    chainJson, chainImported, chainSheet, new SheetLineAssignmentRegister(),
+    new SheetUShapeAssignmentRegister(), chainRestored);
+Assert(chainRestored.TryGet(0, out var recoveredChain) &&
+    recoveredChain == chainAnnotation,
+    "Round-trip keeps direction, start phase, insets and source identity");
+bool RejectChainRestore(string json, IReadOnlyList<DxfLine> source,
+    SheetChainAssignmentRegister? receiver)
+{
+    try
+    {
+        SheetLineAssignmentSidecar.Restore(json, source, chainSheet,
+            new SheetLineAssignmentRegister(),
+            new SheetUShapeAssignmentRegister(), receiver);
+        return false;
+    }
+    catch (FormatException) { return true; }
+}
+Assert(RejectChainRestore(chainJson, chainImported, null),
+    "Legacy loader rejects group instead of silently dropping it");
+Assert(RejectChainRestore(chainJson,
+    [chainImported[0],
+     new DxfLine("SLOT", new Point2(10, 21), new Point2(60, 20)),
+     chainImported[2]], chainRestored),
+    "Changing one imported LINE rejects old sidecar");
+Assert(RejectChainRestore(
+    chainJson.Replace("\"StartInsetMm\":5", "\"StartInsetMm\":9999"),
+    chainImported, chainRestored),
+    "Invalid chain insets reject entire sidecar");
+Assert(chainRestored.TryGet(0, out recoveredChain) &&
+    recoveredChain == chainAnnotation,
+    "Failed restores preserve previous accepted chain annotations");
+var sameComponentAlternate = chainAnnotation with { SelectedLineIndex = 1 };
+Assert(!chainRegistry.Assign(sameComponentAlternate, chainImported, chainSheet).IsValid &&
+    chainRegistry.Count == 1,
+    "Duplicate assignment of the same connected chain is refused");
+var priorV2 = chainJson.Replace("\"Version\":3", "\"Version\":2")
+    .Replace(",\"Chains\":[", ",\"ExtraChains\":[");
+Assert(RejectChainRestore(priorV2, chainImported, chainRestored),
+    "A legacy version cannot silently contain v3 chain technology");
 
 Console.WriteLine("AI CutPro core checks passed.");
