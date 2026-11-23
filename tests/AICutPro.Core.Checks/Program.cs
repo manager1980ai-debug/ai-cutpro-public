@@ -4173,4 +4173,18 @@ Assert(PreviewContourValidator.ValidateOpen(new PreviewPath(
     false)).Count > 0,
     "Retraced or endpoint-closed LINE cannot masquerade as open technology");
 
+var importedAnalyticCrossing = new DxfShape[]
+{
+    new DxfLine("CROSS", new Point2(10, 50), new Point2(90, 50)),
+    new DxfLine("CROSS", new Point2(90, 50), new Point2(90, 90)),
+    new DxfArc("CROSS", new Point2(90, 50), 40, 90, 270)
+};
+var crossingMixedResult = MixedOpenChainAssembler.Assemble(
+    importedAnalyticCrossing, 2, mixedOpenSheet);
+Assert(!crossingMixedResult.IsValid &&
+    crossingMixedResult.Issues.Any(x =>
+        x.Contains("Analytic open-chain geometry rejected",
+            StringComparison.OrdinalIgnoreCase)),
+    "The imported mixed DXF assembler enforces analytic crossings before drawing");
+
 Console.WriteLine("AI CutPro core checks passed.");
