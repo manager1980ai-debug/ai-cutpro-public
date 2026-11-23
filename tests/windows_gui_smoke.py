@@ -243,7 +243,7 @@ def probe_selected_dxf_line(executable):
     path.write_text(
         "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n"
         "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nCUT_SAMPLE\n"
-        "10\n15\n20\n35\n11\n180\n21\n35\n0\nENDSEC\n0\nEOF\n",
+        "10\n15\n20\n35\n11\n180\n21\n35\n"\n        "0\nLINE\n8\nCUT_SAMPLE\n10\n180\n20\n35\n11\n180\n21\n75\n"\n        "0\nENDSEC\n0\nEOF\n",
         encoding="ascii")
     launched = subprocess.Popen([str(executable), "--open-dxf", str(path)],
                                 cwd=executable.parent)
@@ -345,6 +345,19 @@ def probe_selected_dxf_line(executable):
             time.sleep(0.2)
         else:
             raise RuntimeError("Open-cut preset did not update the editor preview")
+        chain_buttons = [b for b in operation_window.descendants(control_type="Button")
+                         if b.window_text() == "Предпросмотр связанной цепочки DXF LINE"]
+        if len(chain_buttons) != 1:
+            raise RuntimeError("Open DXF LINE chain preview button missing")
+        chain_buttons[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Предпросмотр цепочки: 2 DXF LINE" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Connected DXF LINE chain did not preview in GUI")
         assign_buttons = [b for b in operation_window.descendants(control_type="Button")
                           if b.window_text() == "Назначить операцию выбранной DXF LINE (сеанс)"]
         if len(assign_buttons) != 1:
@@ -378,7 +391,7 @@ def probe_selected_dxf_line(executable):
         review_buttons[0].iface_invoke.Invoke()
         for _ in range(15):
             labels = [x.window_text() for x in operation_window.descendants(control_type="Text")]
-            if any("Проверка GEO-3001" in value and "не назначено: 1" in value
+            if any("Проверка GEO-3001" in value and "не назначено: 2" in value
                    for value in labels):
                 break
             time.sleep(0.2)
