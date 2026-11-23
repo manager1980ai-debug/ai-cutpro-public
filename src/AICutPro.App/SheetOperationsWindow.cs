@@ -25,6 +25,7 @@ public sealed class SheetOperationsWindow : Window
     private readonly Sheet _sheet;
     private readonly SheetLineAssignmentRegister _assignments = new();
     private readonly SheetUShapeAssignmentRegister _uAssignments = new();
+    private readonly SheetChainAssignmentRegister _chainAssignments = new();
     private readonly TextBox _startX, _startY, _endX, _endY;
     private readonly TextBox _startInset, _endInset, _cut, _skip, _uHeight;
     private readonly TextBlock _status;
@@ -195,6 +196,12 @@ public sealed class SheetOperationsWindow : Window
         };
         chainPreview.Click += (_, _) => RenderConnectedChain();
         root.Children.Add(chainPreview);
+        var assignChain = new Button { Content = "Назначить открытую цепочку (группа)" };
+        assignChain.Click += (_, _) => AssignConnectedChain();
+        root.Children.Add(assignChain);
+        var clearChain = new Button { Content = "Снять назначение цепочки" };
+        clearChain.Click += (_, _) => RemoveConnectedChain();
+        root.Children.Add(clearChain);
         var uOptions = new StackPanel { Spacing = 4 };
         uOptions.Children.Add(new TextBlock
         {
@@ -300,6 +307,29 @@ public sealed class SheetOperationsWindow : Window
             _skip.Text = "2";
         }
         RenderPreview();
+        foreach (var entry in _chainAssignments.Snapshot())
+        {
+            var memberChain = DxfOpenLineChainBuilder.Build(_dxfLines, entry.Key);
+            if (!memberChain.IsValid || !memberChain.SourceIndices.Contains(selected - 1))
+                continue;
+            var chainOp = entry.Value;
+            _kind.SelectedIndex = chainOp.Kind switch
+            {
+                SheetOperationKind.OpenThroughCut => 0,
+                SheetOperationKind.PerforatedCut => 1,
+                SheetOperationKind.BendReference => 2,
+                SheetOperationKind.Marking => 3,
+                _ => -1
+            };
+            _processing.SelectedIndex = (int)chainOp.Processing;
+            _chainDirection.SelectedIndex = chainOp.ReverseDirection ? 1 : 0;
+            _chainFirstPhase.SelectedIndex = chainOp.StartWithCut ? 0 : 1;
+            _startInset.Text = chainOp.StartInsetMm.ToString("R", CultureInfo.InvariantCulture);
+            _endInset.Text = chainOp.EndInsetMm.ToString("R", CultureInfo.InvariantCulture);
+            _cut.Text = chainOp.CutLengthMm.ToString("R", CultureInfo.InvariantCulture);
+            _skip.Text = chainOp.SkipLengthMm.ToString("R", CultureInfo.InvariantCulture);
+            break;
+        }
         if (_uAssignments.TryGet(selected - 1, out var savedGroup) &&
             savedGroup is not null)
         {
@@ -321,7 +351,7 @@ public sealed class SheetOperationsWindow : Window
             return;
         }
         var findings = OpenGeometryIntentReview.Inspect(
-            _dxfLines, _sheet, _assignments, _uAssignments);
+            _dxfLines, _sheet, _assignments, _uAssignments, _chainAssignments);
         var accepted = findings.Count(x => x.Status == OpenLineIntentStatus.AssignedPreview);
         var unresolved = findings.Count(x => x.Status == OpenLineIntentStatus.NeedsReview);
         var invalid = findings.Count(x => x.Status == OpenLineIntentStatus.InvalidAssignment);
@@ -341,7 +371,7 @@ public sealed class SheetOperationsWindow : Window
                 return;
             }
             var json = SheetLineAssignmentSidecar.Export(
-                _dxfLines, _sheet, _assignments, _uAssignments);
+                _dxfLines, _sheet, _assignments, _uAssignments, _chainAssignments);
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
                 Title = "Сохранить технологические назначения (не DXF)",
@@ -358,7 +388,7 @@ public sealed class SheetOperationsWindow : Window
             await using var writer = new StreamWriter(stream);
             await writer.WriteAsync(json);
             await writer.FlushAsync();
-            _status.Text = $"Сохранено линий: {_assignments.Count}; П-образных групп: {_uAssignments.Count}. DXF не изменён.";
+            _status.Text = $"Сохранено линий: {_assignments.Count}; П-образных групп: {_uAssignments.Count}; цепочек: {_chainAssignments.Count}. DXF не изменён.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                    or FormatException or NotSupportedException)
@@ -405,7 +435,7 @@ public sealed class SheetOperationsWindow : Window
                 _assignments, _uAssignments);
             if (_sourceLine.SelectedIndex > 0)
                 ApplySelectedLine();
-            _status.Text = $"Восстановлено назначений: {_assignments.Count}; П-образных групп: {_uAssignments.Count}. " +
+            _status.Text = $"Восстановлено назначений: {_assignments.Count}; П-образных групп: {_uAssignments.Count}; цепочек: {_chainAssignments.Count}. " +
                 "Исходный DXF не изменён; управление станком запрещено.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -516,6 +546,69 @@ public sealed class SheetOperationsWindow : Window
         _status.Text = result.IsValid
             ? $"П-образная группа назначена. Групп: {_uAssignments.Count}. Сохраните JSON, чтобы восстановить её позже."
             : "П-образная группа отклонена: " + string.Join("; ", result.Issues);
+    }
+
+    private SheetChainAnnotation? CurrentChainAnnotation()
+    {
+        var index = _sourceLine.SelectedIndex - 1;
+        if (index < 0 || index >= _dxfLines.Count ||
+            !Number(_startInset, out var startInset) ||
+            !Number(_endInset, out var endInset) ||
+            !Number(_cut, out var cut) || !Number(_skip, out var skip))
+            return null;
+        var kind = _kind.SelectedIndex switch
+        {
+            0 => SheetOperationKind.OpenThroughCut,
+            1 => SheetOperationKind.PerforatedCut,
+            2 => SheetOperationKind.BendReference,
+            3 => SheetOperationKind.Marking,
+            _ => SheetOperationKind.Unassigned
+        };
+        var processing = SelectedProcessing();
+        if (processing != SheetLineProcessingMode.PerforatedThroughCut)
+            cut = skip = 0;
+        return new SheetChainAnnotation(index, _chainDirection.SelectedIndex == 1,
+            kind, processing, startInset, endInset, cut, skip,
+            _chainFirstPhase.SelectedIndex != 1);
+    }
+
+    private void AssignConnectedChain()
+    {
+        var annotation = CurrentChainAnnotation();
+        if (annotation is null)
+        {
+            _status.Text = "Выберите DXF LINE и корректные числовые параметры.";
+            return;
+        }
+        var result = _chainAssignments.Assign(annotation, _dxfLines, _sheet);
+        _status.Text = result.IsValid
+            ? $"Цепочка назначена. Сохранено цепочек: {_chainAssignments.Count}. Для записи на диск сохраните JSON."
+            : "Назначение цепочки отклонено: " + string.Join("; ", result.Issues);
+    }
+
+    private void RemoveConnectedChain()
+    {
+        var index = _sourceLine.SelectedIndex - 1;
+        if (index < 0 || index >= _dxfLines.Count)
+        {
+            _status.Text = "Сначала выберите DXF LINE.";
+            return;
+        }
+        // Any member of the same unambiguous component may locate its owner.
+        var chain = DxfOpenLineChainBuilder.Build(_dxfLines, index);
+        var keys = _chainAssignments.Snapshot().Keys.ToArray();
+        var removed = false;
+        if (chain.IsValid)
+            foreach (var key in keys)
+            {
+                var existing = DxfOpenLineChainBuilder.Build(_dxfLines, key);
+                if (existing.IsValid &&
+                    existing.SourceIndices.Any(chain.SourceIndices.Contains))
+                    removed |= _chainAssignments.Remove(key);
+            }
+        _status.Text = removed
+            ? $"Назначение цепочки удалено. Осталось цепочек: {_chainAssignments.Count}."
+            : "Для выбранной DXF LINE нет назначенной цепочки.";
     }
 
     private void RenderConnectedChain()
