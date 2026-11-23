@@ -243,7 +243,9 @@ def probe_selected_dxf_line(executable):
     path.write_text(
         "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n"
         "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nCUT_SAMPLE\n"
-        "10\n15\n20\n35\n11\n180\n21\n35\n"\n        "0\nLINE\n8\nCUT_SAMPLE\n10\n180\n20\n35\n11\n180\n21\n75\n"\n        "0\nENDSEC\n0\nEOF\n",
+        "10\n15\n20\n35\n11\n180\n21\n35\n"
+        "0\nLINE\n8\nCUT_SAMPLE\n10\n180\n20\n35\n11\n180\n21\n75\n"
+        "0\nENDSEC\n0\nEOF\n",
         encoding="ascii")
     launched = subprocess.Popen([str(executable), "--open-dxf", str(path)],
                                 cwd=executable.parent)
