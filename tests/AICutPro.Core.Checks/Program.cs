@@ -3610,4 +3610,45 @@ try
 catch (ArgumentOutOfRangeException) { rejectedUnknownPreset = true; }
 Assert(rejectedUnknownPreset, "Unknown preset ID fails closed");
 
+// B1.2-06: U-shaped tab has 3 physical cut sides and a separately treated base.
+var uSheet = new Sheet(200, 100);
+var uNoCut = SheetUShapedPreset.Inspect(
+    uSheet, 30, 20, 70, 40);
+Assert(uNoCut.IsValid && uNoCut.Operations.Count == 4
+    && uNoCut.Segments.Count == 4
+    && uNoCut.Operations[3].Kind == SheetOperationKind.BendReference
+    && uNoCut.Operations.Take(3).All(x =>
+        x.Processing == SheetLineProcessingMode.ThroughCut)
+    && !uNoCut.Segments[^1].IsCut && !uNoCut.CanGenerateMachineCommands,
+    "U-shaped template retains separate noncut bend base");
+var uThrough = SheetUShapedPreset.Inspect(
+    uSheet, 30, 20, 70, 40, SheetLineProcessingMode.ThroughCut);
+Assert(uThrough.IsValid && uThrough.Segments.All(x => x.IsCut)
+    && !uThrough.CanGenerateMachineCommands,
+    "U-shaped bend base may be marked as full through-cut preview");
+var uSkip = SheetUShapedPreset.Inspect(
+    uSheet, 30, 20, 70, 40,
+    SheetLineProcessingMode.PerforatedThroughCut, 3, 2);
+Assert(uSkip.IsValid && uSkip.Segments.Count > 4
+    && uSkip.Segments.Any(x => !x.IsCut)
+    && uSkip.Segments.Count(x => x.IsCut) > 3
+    && !uSkip.CanGenerateMachineCommands,
+    "U-shaped base may use alternating cuts and retained bridges");
+Assert(!SheetUShapedPreset.Inspect(
+    uSheet, 190, 20, 30, 40).IsValid,
+    "U-shaped template rejects exceeding sheet bounds");
+Assert(!SheetUShapedPreset.Inspect(
+    uSheet, 10, 10, double.NaN, 20).IsValid,
+    "U-shaped template rejects nonfinite dimensions");
+Assert(!SheetUShapedPreset.Inspect(
+    uSheet, 10, 10, 0, 20).IsValid,
+    "U-shaped template rejects degenerate width");
+Assert(!SheetUShapedPreset.Inspect(
+    uSheet, 10, 10, 70, 20, SheetLineProcessingMode.AutoLegacy).IsValid,
+    "U-shaped base requires explicit treatment");
+Assert(!SheetUShapedPreset.Inspect(
+    uSheet, 10, 10, 70, 20,
+    SheetLineProcessingMode.PerforatedThroughCut, 0, 2).IsValid,
+    "U-shaped base refuses invalid cut/skip settings");
+
 Console.WriteLine("AI CutPro core checks passed.");
