@@ -371,8 +371,21 @@ def probe_selected_dxf_line(executable):
             time.sleep(0.2)
         else:
             raise RuntimeError("Imported DXF LINE operation was not cleared")
+        review_buttons = [b for b in operation_window.descendants(control_type="Button")
+                          if b.window_text() == "Проверить назначения открытых DXF LINE"]
+        if len(review_buttons) != 1:
+            raise RuntimeError("GEO-3001 intent review action missing")
+        review_buttons[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in operation_window.descendants(control_type="Text")]
+            if any("Проверка GEO-3001" in value and "не назначено: 1" in value
+                   for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("GEO-3001 did not report unresolved imported LINE")
         operation_window.close()
-        print("GUI DXF LINE selection PASS: endpoints confirmed, session assignment and removal verified")
+        print("GUI DXF LINE selection PASS: endpoints, presets, operations and GEO-3001 review verified")
     finally:
         launched.terminate()
         try:
