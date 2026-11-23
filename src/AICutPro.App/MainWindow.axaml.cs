@@ -483,6 +483,10 @@ public partial class MainWindow : Window
                     imported.Shapes, _workspace.MaterialSheet);
                 if (!independent.IsValid)
                     fullDiagnosticIssues.AddRange(independent.Issues);
+                // Standalone circles and closed polyline boundaries can also
+                // be crossed by independently valid open drawing operations.
+                fullDiagnosticIssues.AddRange(DxfOpenClosedContactReview.Inspect(
+                    imported.Shapes, _workspace.MaterialSheet));
             }
             var contourMeasurements = mixedTopology.Complete
                 ? mixedTopology.ClosedPaths.Select(path => PreviewContourMetrics.Measure(path, toleranceMm)).ToArray()
