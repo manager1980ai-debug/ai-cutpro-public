@@ -20,6 +20,19 @@ public enum SheetOperationKind
 /// Parameters in millimetres. Start/EndInset trim the intended open operation
 /// (not the underlying drawing). Cut/Skip apply only to PerforatedCut.
 /// </summary>
+/// <summary>
+/// Physical preview treatment, independent from why a line exists in CAD.
+/// AutoLegacy preserves existing saved-less preview callers.
+/// </summary>
+public enum SheetLineProcessingMode
+{
+    AutoLegacy,
+    NoCut,
+    SurfaceScore,
+    ThroughCut,
+    PerforatedThroughCut
+}
+
 public sealed record SheetLineOperation(
     SheetOperationKind Kind,
     Point2 Start,
@@ -27,7 +40,8 @@ public sealed record SheetLineOperation(
     double StartInsetMm = 0,
     double EndInsetMm = 0,
     double CutLengthMm = 0,
-    double SkipLengthMm = 0);
+    double SkipLengthMm = 0,
+    SheetLineProcessingMode Processing = SheetLineProcessingMode.AutoLegacy);
 
 public sealed record SheetLinePreviewSegment(Point2 Start, Point2 End, bool IsCut);
 
@@ -53,6 +67,8 @@ public static class SheetOperationPlanner
         ArgumentNullException.ThrowIfNull(operation);
         ArgumentNullException.ThrowIfNull(sheet);
         var errors = new List<string>();
+        if (!Enum.IsDefined(operation.Processing))
+            errors.Add("Unknown line processing mode.");
         if (operation.Kind is not (SheetOperationKind.OpenThroughCut
             or SheetOperationKind.PerforatedCut or SheetOperationKind.BendReference
             or SheetOperationKind.Marking))
@@ -68,7 +84,15 @@ public static class SheetOperationPlanner
         if (!double.IsFinite(operation.StartInsetMm) || operation.StartInsetMm < 0
             || !double.IsFinite(operation.EndInsetMm) || operation.EndInsetMm < 0)
             errors.Add("Line end insets must be finite and nonnegative.");
-        if (operation.Kind == SheetOperationKind.PerforatedCut)
+        var processing = operation.Processing == SheetLineProcessingMode.AutoLegacy
+            ? operation.Kind switch
+            {
+                SheetOperationKind.PerforatedCut => SheetLineProcessingMode.PerforatedThroughCut,
+                SheetOperationKind.OpenThroughCut => SheetLineProcessingMode.ThroughCut,
+                _ => SheetLineProcessingMode.NoCut
+            }
+            : operation.Processing;
+        if (processing == SheetLineProcessingMode.PerforatedThroughCut)
         {
             if (!double.IsFinite(operation.CutLengthMm) || operation.CutLengthMm <= 0
                 || !double.IsFinite(operation.SkipLengthMm) || operation.SkipLengthMm <= 0)
@@ -96,10 +120,11 @@ public static class SheetOperationPlanner
         var end = distance - operation.EndInsetMm;
         var cursor = operation.StartInsetMm;
         var segments = new List<SheetLinePreviewSegment>();
-        if (operation.Kind != SheetOperationKind.PerforatedCut)
+        if (processing != SheetLineProcessingMode.PerforatedThroughCut)
         {
-            // BendReference is a planning annotation, never a torch cut.
-            var cutting = operation.Kind == SheetOperationKind.OpenThroughCut;
+            // A bend intent may have an explicitly selected through-cut treatment.
+            // This is visual intent only, not engineering approval or torch control.
+            var cutting = processing == SheetLineProcessingMode.ThroughCut;
             segments.Add(new(At(cursor), At(end), cutting));
         }
         else
