@@ -23,7 +23,7 @@ public sealed class SheetOperationsWindow : Window
     private readonly TextBlock _status;
     private readonly Canvas _drawing;
 
-    public SheetOperationsWindow(DxfImportResult? document = null, Sheet? sheet = null)
+    public SheetOperationsWindow(DxfImportResult? document = null, Sheet? sheet = null, int? selectedLineIndex = null)
     {
         _sheet = sheet ?? new Sheet(200, 100);
         _dxfLines = document?.Shapes.OfType<DxfLine>().ToArray() ?? [];
@@ -139,7 +139,10 @@ public sealed class SheetOperationsWindow : Window
             TextWrapping = TextWrapping.Wrap
         });
         Content = new ScrollViewer { Content = root };
-        RenderPreview();
+        if (selectedLineIndex is int index && index >= 0 && index < _dxfLines.Count)
+            _sourceLine.SelectedIndex = index + 1;
+        else
+            RenderPreview();
     }
 
     private static TextBox Field(string text) => new() { Text = text, Width = 112 };
