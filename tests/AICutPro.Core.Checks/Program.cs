@@ -3841,4 +3841,27 @@ Assert(!DxfOpenLineChainBuilder.Build(
 Assert(!DxfOpenLineChainBuilder.Build(connectedLines, -1).IsValid,
     "Invalid DXF LINE index fails closed");
 
+// Reversal changes the declared start/end of the open DXF chain.
+var reversedChain = DxfOpenLineChainBuilder.Build(connectedLines, 0, true);
+Assert(reversedChain.IsValid &&
+    reversedChain.SourceIndices.SequenceEqual([0, 1]) &&
+    reversedChain.Vertices.SequenceEqual(rightAngleChain.Reverse()),
+    "Explicit reverse direction reverses ordered source LINEs and vertices");
+var chainFirstSkip = SheetOpenChainPlanner.Inspect(
+    rightAngleChain, chainSheet, SheetOperationKind.PerforatedCut,
+    SheetLineProcessingMode.PerforatedThroughCut,
+    0, 0, 3, 2, startWithCut: false);
+Assert(chainFirstSkip.IsValid && chainFirstSkip.Segments.Count >= 2 &&
+    !chainFirstSkip.Segments[0].IsCut &&
+    chainFirstSkip.Segments[1].IsCut &&
+    !chainFirstSkip.CanGenerateMachineCommands,
+    "Perforation may explicitly start with a retained bridge instead of a cut");
+var reversedInsetPreview = SheetOpenChainPlanner.Inspect(
+    reversedChain.Vertices, chainSheet, SheetOperationKind.OpenThroughCut,
+    SheetLineProcessingMode.ThroughCut, 5, 10);
+Assert(reversedInsetPreview.IsValid &&
+    reversedInsetPreview.Segments[0].Start == new Point2(60, 65) &&
+    reversedInsetPreview.Segments[^1].End == new Point2(20, 20),
+    "Reversing chain changes where start and end insets are applied");
+
 Console.WriteLine("AI CutPro core checks passed.");
