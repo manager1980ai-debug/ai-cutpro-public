@@ -238,7 +238,9 @@ public static class MixedOpenChainAssembler
         }
         foreach (var p in display)
             if (!double.IsFinite(p.X) || !double.IsFinite(p.Y) ||
-                p.X < 0 || p.Y < 0 || p.X > sheet.WidthMm || p.Y > sheet.HeightMm)
+                p.X < -1e-9 || p.Y < -1e-9 ||
+                p.X > sheet.WidthMm + 1e-9 ||
+                p.Y > sheet.HeightMm + 1e-9)
                 return Fail("Open mixed chain extends outside sheet.");
         var intersections = OpenChainIntersectionCheck.Inspect(display);
         if (intersections.Count > 0)
