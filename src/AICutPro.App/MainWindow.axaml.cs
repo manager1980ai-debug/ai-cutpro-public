@@ -471,6 +471,19 @@ public partial class MainWindow : Window
             var fullDiagnosticIssues = new List<string>();
             fullDiagnosticIssues.AddRange(gate.BlockingIssues);
             fullDiagnosticIssues.AddRange(mixedTopology.Warnings);
+            // Cross-layer open components are not caught by per-path or
+            // closed-ring-only topology checks. This is diagnostics, not CAM.
+            if (imported.InsUnits == 4 &&
+                imported.Shapes.Count is > 0 and <= 100 &&
+                imported.Shapes.Any(shape => shape is DxfLine or DxfArc or
+                    DxfPolyline { Closed: false } or
+                    DxfBulgedPolyline { Closed: false }))
+            {
+                var independent = DxfIndependentOpenPathReview.Inspect(
+                    imported.Shapes, _workspace.MaterialSheet);
+                if (!independent.IsValid)
+                    fullDiagnosticIssues.AddRange(independent.Issues);
+            }
             var contourMeasurements = mixedTopology.Complete
                 ? mixedTopology.ClosedPaths.Select(path => PreviewContourMetrics.Measure(path, toleranceMm)).ToArray()
                 : [];
