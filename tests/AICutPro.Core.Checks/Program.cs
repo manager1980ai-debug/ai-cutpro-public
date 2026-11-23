@@ -4135,4 +4135,42 @@ Assert(mixedBulgePreview.IsValid &&
     Math.Abs(mixedBulgePreview.LengthMm - (25 + 20 * Math.PI)) < 1e-6,
     "Bulged open POLYLINE joins LINE segments while preserving analytic arc");
 
+// B1: exact line/arc intersection checks for OPEN analytic geometry.
+Assert(PreviewContourValidator.ValidateOpen(mixedOpen.AnalyticPath!).Count == 0,
+    "Previously verified mixed LINE/ARC open chain passes analytic inspection");
+var analyticCrossing = new PreviewPath(
+    [
+        new PreviewLine(new PreviewPoint(10, 50), new PreviewPoint(90, 50)),
+        new PreviewLine(new PreviewPoint(90, 50), new PreviewPoint(90, 90)),
+        new PreviewArc(new PreviewPoint(90, 50), 40, 90, 180)
+    ], false);
+Assert(PreviewContourValidator.ValidateOpen(analyticCrossing).Any(
+    x => x.Contains("cross or touch", StringComparison.OrdinalIgnoreCase)),
+    "ARC crossing a nonadjacent LINE is detected at an analytic intersection");
+var analyticRetrace = new PreviewPath(
+    [
+        new PreviewArc(new PreviewPoint(50, 50), 20, 0, 90),
+        new PreviewArc(new PreviewPoint(50, 50), 20, 90, -45)
+    ], false);
+Assert(PreviewContourValidator.ValidateOpen(analyticRetrace).Any(
+    x => x.Contains("overlapping", StringComparison.OrdinalIgnoreCase)),
+    "Adjacent analytic arcs on the same circle cannot retrace");
+var openWithGap = new PreviewPath(
+    [
+        new PreviewLine(new PreviewPoint(10, 10), new PreviewPoint(40, 10)),
+        new PreviewLine(new PreviewPoint(40.1, 10), new PreviewPoint(60, 10))
+    ], false);
+Assert(PreviewContourValidator.ValidateOpen(openWithGap).Any(
+    x => x.Contains("gap", StringComparison.OrdinalIgnoreCase)),
+    "Open analytic path rejects a 0.1 mm join gap");
+var simpleOpenArc = new PreviewPath(
+    [new PreviewArc(new PreviewPoint(50, 50), 20, 0, 90)], false);
+Assert(PreviewContourValidator.ValidateOpen(simpleOpenArc).Count == 0,
+    "Single analytic ARC is an acceptable open preview");
+Assert(PreviewContourValidator.ValidateOpen(new PreviewPath(
+    [new PreviewLine(new PreviewPoint(10, 10), new PreviewPoint(30, 10)),
+     new PreviewLine(new PreviewPoint(30, 10), new PreviewPoint(10, 10))],
+    false)).Count > 0,
+    "Retraced or endpoint-closed LINE cannot masquerade as open technology");
+
 Console.WriteLine("AI CutPro core checks passed.");
