@@ -12,6 +12,69 @@ from pywinauto import Desktop
 
 
 
+def probe_project_picker_roundtrip(window):
+    """Use actual Windows Save/Open dialogs, not synthetic app entrypoints."""
+    import json
+    target = (pathlib.Path.cwd() / "dist" / "a1_picker_roundtrip.json").resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    def button_named(name):
+        matches = [b for b in window.descendants(control_type="Button")
+                   if b.window_text() == name]
+        if len(matches) != 1:
+            raise RuntimeError("Missing project picker action: " + name)
+        return matches[0]
+
+    def use_picker(action, submit_names):
+        button_named(action).iface_invoke.Invoke()
+        dialog = None
+        for _ in range(50):
+            candidates = [w for w in Desktop(backend="uia").windows()
+                          if w.is_visible() and w.handle != window.handle
+                          and w.process_id() == window.process_id()]
+            if candidates:
+                dialog = candidates[-1]
+                break
+            time.sleep(0.2)
+        if dialog is None:
+            raise RuntimeError("Windows native file picker did not appear for " + action)
+        edits = dialog.descendants(control_type="Edit")
+        if not edits:
+            raise RuntimeError("File picker has no editable filename control: " +
+                               dialog.window_text())
+        # The desktop common dialog normally uses automation id 1148 for FileName.
+        file_edit = next((e for e in edits
+                          if e.element_info.automation_id == "1148"), edits[-1])
+        file_edit.set_edit_text(str(target))
+        buttons = [b for b in dialog.descendants(control_type="Button")
+                   if b.window_text().lower() in submit_names]
+        if not buttons:
+            raise RuntimeError("Cannot submit Windows picker: " +
+                               dialog.window_text() + " / " +
+                               repr([b.window_text() for b in
+                                     dialog.descendants(control_type="Button")]))
+        buttons[-1].iface_invoke.Invoke()
+
+    use_picker("Сохранить проект (.json)", {"save", "сохранить"})
+    for _ in range(30):
+        if target.is_file() and target.stat().st_size > 0:
+            break
+        time.sleep(0.2)
+    if not target.is_file():
+        raise RuntimeError("Windows project Save dialog did not write JSON")
+    saved = json.loads(target.read_text(encoding="utf-8-sig"))
+    if saved["FormatVersion"] != 1 or not saved["Parts"]:
+        raise RuntimeError("Saved project JSON is missing required fields")
+    use_picker("Открыть проект (.json)", {"open", "открыть"})
+    for _ in range(30):
+        labels = [x.window_text() for x in window.descendants(control_type="Text")]
+        if any("открыт:" in t and "детал" in t for t in labels):
+            print("GUI native project Save/Open pickers PASS: real JSON roundtrip")
+            return
+        time.sleep(0.2)
+    raise RuntimeError("Windows Open dialog did not restore project: " + repr(labels))
+
+
 def probe_tab_navigation(window):
     """Exercise a real UIA button and observe the resulting status content."""
     def ui_text():
@@ -58,6 +121,7 @@ def probe_tab_navigation(window):
         if not any("1. Кронштейн × 10" in t for t in ui_text()):
             raise RuntimeError("Part selector failed to return to one project part")
     print("GUI multi-part editor PASS: add/apply/remove operations and selector")
+    probe_project_picker_roundtrip(window)
 
     invoke(button_named("История"))
     assert_status("Раздел «История»")
