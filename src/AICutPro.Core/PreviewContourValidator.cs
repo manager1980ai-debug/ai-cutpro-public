@@ -214,6 +214,52 @@ public static class PreviewContourValidator
     }
 
     /// <summary>
+    /// Check two independent, already-connected analytic preview paths.
+    /// Unlike neighbors in one chain, NO shared endpoint is permitted across
+    /// distinct operations, even if the paths are on different DXF layers.
+    /// Geometry-only refusal; not a machine clearance or nesting decision.
+    /// </summary>
+    public static IReadOnlyList<string> ValidateDistinctPaths(
+        PreviewPath first, PreviewPath second,
+        double joinToleranceMm = 0.001,
+        double intersectionToleranceMm = DefaultIntersectionToleranceMm)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+        if (!double.IsFinite(joinToleranceMm) ||
+            joinToleranceMm < 1e-7 || joinToleranceMm > 0.01 ||
+            !double.IsFinite(intersectionToleranceMm) ||
+            intersectionToleranceMm < 1e-9 ||
+            intersectionToleranceMm > 0.01)
+            throw new ArgumentOutOfRangeException(nameof(joinToleranceMm));
+        if (first.Segments.Count is < 1 or > 1000 ||
+            second.Segments.Count is < 1 or > 1000 ||
+            (long)first.Segments.Count * second.Segments.Count > 250_000)
+            return ["Independent path comparison exceeds the preview limit."];
+        var a = first.Closed ? Validate(first, joinToleranceMm,
+            intersectionToleranceMm) : ValidateOpen(first, joinToleranceMm,
+            intersectionToleranceMm);
+        if (a.Count > 0)
+            return ["First path is invalid: " + string.Join("; ", a)];
+        var b = second.Closed ? Validate(second, joinToleranceMm,
+            intersectionToleranceMm) : ValidateOpen(second, joinToleranceMm,
+            intersectionToleranceMm);
+        if (b.Count > 0)
+            return ["Second path is invalid: " + string.Join("; ", b)];
+        for (var i = 0; i < first.Segments.Count; i++)
+        for (var j = 0; j < second.Segments.Count; j++)
+        {
+            var hits = Intersections(first.Segments[i], second.Segments[j],
+                intersectionToleranceMm);
+            if (hits is null)
+                return [$"Independent analytic paths overlap at {i + 1}/{j + 1}."];
+            if (hits.Count > 0)
+                return [$"Independent analytic paths intersect or touch at {i + 1}/{j + 1}."];
+        }
+        return [];
+    }
+
+    /// <summary>
     /// Checks contacts between TWO distinct analytic preview rings. A touching or crossing
     /// boundary is an error even when each ring is individually simple. This does not
     /// determine nesting, hole ownership, or eligibility for CAM.
