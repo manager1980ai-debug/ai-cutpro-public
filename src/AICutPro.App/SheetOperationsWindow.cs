@@ -15,6 +15,7 @@ namespace AICutPro.App;
 public sealed class SheetOperationsWindow : Window
 {
     private readonly ComboBox _kind;
+    private readonly ComboBox _processing;
     private readonly ComboBox _sourceLine;
     private readonly IReadOnlyList<DxfLine> _dxfLines;
     private readonly Sheet _sheet;
@@ -42,6 +43,18 @@ public sealed class SheetOperationsWindow : Window
                 "Прерывистый рез (Cut / Skip)",
                 "Линия будущего сгиба",
                 "Линия разметки"
+            },
+            SelectedIndex = 0
+        };
+        _processing = new ComboBox
+        {
+            ItemsSource = new[]
+            {
+                "По назначению (совместимый режим)",
+                "Без резки",
+                "Поверхностный надрез (только схема)",
+                "Сплошной сквозной рез (только схема)",
+                "Прерывистый сквозной рез (только схема)"
             },
             SelectedIndex = 0
         };
@@ -126,7 +139,10 @@ public sealed class SheetOperationsWindow : Window
                 ApplySelectedLine();
         };
         root.Children.Add(applySource);
+        root.Children.Add(new TextBlock { Text = "Функциональное назначение" });
         root.Children.Add(_kind);
+        root.Children.Add(new TextBlock { Text = "Способ обработки (независимо от назначения)" });
+        root.Children.Add(_processing);
         root.Children.Add(fields);
         root.Children.Add(preview);
         var assign = new Button { Content = "Назначить операцию выбранной DXF LINE (сеанс)" };
@@ -183,6 +199,7 @@ public sealed class SheetOperationsWindow : Window
                 SheetOperationKind.Marking => 3,
                 _ => -1
             };
+            _processing.SelectedIndex = (int)stored.Processing;
             _startInset.Text = stored.StartInsetMm.ToString("R", CultureInfo.InvariantCulture);
             _endInset.Text = stored.EndInsetMm.ToString("R", CultureInfo.InvariantCulture);
             _cut.Text = stored.CutLengthMm.ToString("R", CultureInfo.InvariantCulture);
@@ -191,6 +208,7 @@ public sealed class SheetOperationsWindow : Window
         else
         {
             _kind.SelectedIndex = 0;
+            _processing.SelectedIndex = 0;
             _startInset.Text = "5";
             _endInset.Text = "5";
             _cut.Text = "3";
@@ -226,16 +244,30 @@ public sealed class SheetOperationsWindow : Window
             3 => SheetOperationKind.Marking,
             _ => SheetOperationKind.Unassigned
         };
-        if (kind != SheetOperationKind.PerforatedCut)
+        var processing = SelectedProcessing();
+        if (processing != SheetLineProcessingMode.PerforatedThroughCut
+            && !(processing == SheetLineProcessingMode.AutoLegacy
+                 && kind == SheetOperationKind.PerforatedCut))
             cut = skip = 0;
         var imported = _dxfLines[index];
         var result = _assignments.Assign(index, imported.Start, imported.End,
-            new(kind, new(sx, sy), new(ex, ey), a, b, cut, skip), _sheet);
+            new(kind, new(sx, sy), new(ex, ey), a, b, cut, skip, processing), _sheet);
         _status.Text = result.IsValid
             ? $"Операция {kind} назначена DXF LINE №{index + 1}. " +
               $"Назначено линий: {_assignments.Count}. Только текущий сеанс; файл DXF не изменён, резка запрещена."
             : "Назначение отклонено: " + string.Join("; ", result.Issues);
     }
+
+    private SheetLineProcessingMode SelectedProcessing()
+        => _processing.SelectedIndex switch
+        {
+            0 => SheetLineProcessingMode.AutoLegacy,
+            1 => SheetLineProcessingMode.NoCut,
+            2 => SheetLineProcessingMode.SurfaceScore,
+            3 => SheetLineProcessingMode.ThroughCut,
+            4 => SheetLineProcessingMode.PerforatedThroughCut,
+            _ => (SheetLineProcessingMode)(-1)
+        };
 
     private static TextBox Field(string text) => new() { Text = text, Width = 112 };
 
@@ -275,10 +307,13 @@ public sealed class SheetOperationsWindow : Window
             3 => SheetOperationKind.Marking,
             _ => SheetOperationKind.Unassigned
         };
-        if (kind != SheetOperationKind.PerforatedCut)
+        var processing = SelectedProcessing();
+        if (processing != SheetLineProcessingMode.PerforatedThroughCut
+            && !(processing == SheetLineProcessingMode.AutoLegacy
+                 && kind == SheetOperationKind.PerforatedCut))
             cut = skip = 0;
         var result = SheetOperationPlanner.InspectOpenLine(
-            new(kind, new(sx, sy), new(ex, ey), a, b, cut, skip),
+            new(kind, new(sx, sy), new(ex, ey), a, b, cut, skip, processing),
             _sheet);
         _drawing.Children.Clear();
         var sheet = new Rectangle
