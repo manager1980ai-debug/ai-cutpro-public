@@ -3563,8 +3563,8 @@ foreach (var preset in Enum.GetValues<SheetLinePreset>())
 {
     var operation = SheetLinePresetLibrary.Create(
         preset, presetStart, presetEnd, presetSheet);
-    var preview = SheetOperationPlanner.InspectOpenLine(operation, presetSheet);
-    Assert(preview.IsValid && !preview.CanGenerateMachineCommands
+    var presetPreview = SheetOperationPlanner.InspectOpenLine(operation, presetSheet);
+    Assert(presetPreview.IsValid && !presetPreview.CanGenerateMachineCommands
         && operation.Start == presetStart && operation.End == presetEnd,
         "All open-line presets retain imported coordinates and preview-only gate");
 }
