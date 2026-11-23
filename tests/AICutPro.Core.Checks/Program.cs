@@ -3549,11 +3549,19 @@ Assert(SidecarRejects(sidecarJson, sidecarLines, new Sheet(220, 100)),
     "Sidecar refuses changed sheet dimensions");
 Assert(SidecarRejects("not-json", sidecarLines, sidecarSheet),
     "Sidecar refuses malformed JSON");
-Assert(SidecarRejects(sidecarJson.Replace("\"Version\":1", "\"Version\":999"),
+Assert(SidecarRejects(sidecarJson.Replace("\"Version\":2", "\"Version\":999"),
     sidecarLines, sidecarSheet), "Sidecar refuses unknown schema versions");
 Assert(restoredAnnotations.Count == 1 &&
     restoredAnnotations.TryGet(1, out restoredBend) && restoredBend == bendAnnotation,
     "All failed sidecar restores retain prior accepted annotations");
+
+// Version 1 files contain no U-shape assignments and remain readable.
+var legacyLineSidecar = sidecarJson.Replace("\"Version\":2", "\"Version\":1");
+SheetLineAssignmentSidecar.Restore(
+    legacyLineSidecar, sidecarLines, sidecarSheet, restoredAnnotations);
+Assert(restoredAnnotations.Count == 1 &&
+    restoredAnnotations.TryGet(1, out restoredBend) && restoredBend == bendAnnotation,
+    "Version 1 line-only annotation sidecars remain readable");
 
 // B1.2-06: drafting presets are deterministic, validated, and never CAM.
 var presetSheet = new Sheet(200, 100);
