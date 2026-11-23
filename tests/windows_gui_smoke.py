@@ -577,6 +577,66 @@ def probe_project_file(executable):
             proc.kill()
 
 
+def probe_embedded_project_file(executable):
+    """Real project JSON with native DXF and technology is reopened by Avalonia."""
+    fixture = pathlib.Path.cwd() / "external-dxf-fixtures" / "embedded_gui_project.json"
+    if not fixture.is_file():
+        raise RuntimeError("Verified core project/embedded-DXF fixture was not generated")
+    proc = subprocess.Popen([str(executable), "--open-project", str(fixture)],
+                            cwd=executable.parent)
+    try:
+        window = None
+        for _ in range(30):
+            if proc.poll() is not None:
+                raise RuntimeError("Embedded DXF project process exited before UI")
+            matches = [w for w in Desktop(backend="uia").windows()
+                       if w.process_id() == proc.pid and
+                       "AI CutPro" in w.window_text()]
+            if matches:
+                window = matches[0]
+                break
+            time.sleep(0.25)
+        if window is None:
+            raise RuntimeError("Embedded project window did not appear")
+        for _ in range(20):
+            labels = [w.window_text() for w in
+                      window.descendants(control_type="Text")]
+            if any("DXF technology project" in t and
+                   "200" in t and "130" in t for t in labels):
+                break
+            time.sleep(0.3)
+        else:
+            raise RuntimeError("Embedded DXF project was not reopened: " + repr(labels[-12:]))
+        buttons = [b for b in window.descendants(control_type="Button")
+                   if b.window_text() == "Технологические линии (предпросмотр)"]
+        if len(buttons) != 1:
+            raise RuntimeError("Embedded DXF editor button missing")
+        buttons[0].iface_invoke.Invoke()
+        editor = None
+        for _ in range(20):
+            matches = [w for w in Desktop(backend="uia").windows()
+                       if w.process_id() == proc.pid and
+                       "Технологические линии" in w.window_text()]
+            if matches:
+                editor = matches[0]
+                break
+            time.sleep(0.25)
+        if editor is None:
+            raise RuntimeError("Embedded DXF technology editor did not reopen")
+        labels = [w.window_text() for w in editor.descendants(control_type="Text")]
+        if not any("смешанных 1" in value and "Из проекта восстановлено" in value
+                   for value in labels):
+            raise RuntimeError("Saved ARC technology was not restored: " + repr(labels))
+        editor.close()
+        print("GUI embedded DXF project PASS: original geometry and ARC annotation restored")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main() -> None:
     # GitHub-hosted Windows consoles can default to a legacy codepage; the
     # Russian title is valid UI data and must not make logging fail.
@@ -622,6 +682,7 @@ def main() -> None:
                     probe_open_contour_layer(executable)
                     probe_selected_dxf_line(executable)
                     probe_project_file(executable)
+                    probe_embedded_project_file(executable)
                     print(
                         f"GUI smoke passed: title={window.window_text()!r}, "
                         f"pid={process.pid}, handle={window.handle}, "
