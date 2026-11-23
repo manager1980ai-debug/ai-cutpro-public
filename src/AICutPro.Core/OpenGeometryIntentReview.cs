@@ -47,16 +47,21 @@ public static class OpenGeometryIntentReview
                     null, null, "GEO-3099", "DXF LINE is missing."));
                 continue;
             }
-            var groupAssigned = groups?.TryGet(i, out var group) == true &&
-                group is not null &&
-                groups.Assign(group, importedLines, sheet).IsValid;
+            var groupAssigned = groups is not null &&
+                groups.TryGet(i, out var group) && group is not null &&
+                SheetUShapedPreset.Inspect(
+                    sheet, Math.Min(line.Start.X, line.End.X),
+                    line.Start.Y, Math.Abs(line.End.X - line.Start.X),
+                    group.HeightMm, group.BaseProcessing,
+                    group.CutLengthMm, group.SkipLengthMm).IsValid &&
+                line.Start.Y == line.End.Y;
             if (!assignments.TryGet(i, out var operation) || operation is null)
             {
                 findings.Add(new(i, line.Layer,
                     groupAssigned ? OpenLineIntentStatus.AssignedPreview :
                         OpenLineIntentStatus.NeedsReview,
                     groupAssigned ? SheetOperationKind.BendReference : null,
-                    groupAssigned ? group!.BaseProcessing : null,
+                    groupAssigned ? groups!.Snapshot()[i].BaseProcessing : null,
                     groupAssigned ? "" : "GEO-3001",
                     groupAssigned
                         ? "U-shaped operation preview is explicitly assigned to this base line."
