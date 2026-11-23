@@ -29,6 +29,7 @@ public sealed class SheetOperationsWindow : Window
     private readonly SheetLineAssignmentRegister _assignments = new();
     private readonly SheetUShapeAssignmentRegister _uAssignments = new();
     private readonly SheetChainAssignmentRegister _chainAssignments = new();
+    private readonly SheetMixedChainAssignmentRegister _mixedAssignments = new();
     private readonly TextBox _startX, _startY, _endX, _endY;
     private readonly TextBox _startInset, _endInset, _cut, _skip, _uHeight;
     private readonly TextBlock _status;
@@ -244,6 +245,18 @@ public sealed class SheetOperationsWindow : Window
         };
         mixedPreview.Click += (_, _) => RenderMixedOpenChain();
         root.Children.Add(mixedPreview);
+        var assignMixed = new Button { Content = "Назначить смешанную цепочку (предпросмотр)" };
+        assignMixed.Click += (_, _) => AssignMixedChain();
+        root.Children.Add(assignMixed);
+        var removeMixed = new Button { Content = "Снять назначение смешанной цепочки" };
+        removeMixed.Click += (_, _) => RemoveMixedChain();
+        root.Children.Add(removeMixed);
+        var saveMixed = new Button { Content = "Сохранить смешанные назначения (.json)" };
+        saveMixed.Click += async (_, _) => await SaveMixedAsync();
+        root.Children.Add(saveMixed);
+        var loadMixed = new Button { Content = "Загрузить смешанные назначения (.json)" };
+        loadMixed.Click += async (_, _) => await LoadMixedAsync();
+        root.Children.Add(loadMixed);
         var assignChain = new Button { Content = "Назначить открытую цепочку (группа)" };
         assignChain.Click += (_, _) => AssignConnectedChain();
         root.Children.Add(assignChain);
@@ -480,7 +493,7 @@ public sealed class SheetOperationsWindow : Window
                 throw new FormatException("Файл назначений слишком большой.");
             SheetLineAssignmentSidecar.Restore(
                 new string(buffer, 0, length), _dxfLines, _sheet,
-                _assignments, _uAssignments);
+                _assignments, _uAssignments, _chainAssignments);
             if (_sourceLine.SelectedIndex > 0)
                 ApplySelectedLine();
             _status.Text = $"Восстановлено назначений: {_assignments.Count}; П-образных групп: {_uAssignments.Count}; цепочек: {_chainAssignments.Count}. " +
@@ -666,6 +679,165 @@ public sealed class SheetOperationsWindow : Window
         _status.Text = removed
             ? $"Назначение цепочки удалено. Осталось цепочек: {_chainAssignments.Count}."
             : "Для выбранной DXF LINE нет назначенной цепочки.";
+    }
+
+    private int SelectedCurveShapeIndex()
+    {
+        var index = _sourceCurve.SelectedIndex - 1;
+        if (index < 0 || index >= _curves.Count) return -1;
+        for (var i = 0; i < _allDxfShapes.Count; i++)
+            if (ReferenceEquals(_allDxfShapes[i], _curves[index]))
+                return i;
+        return -1;
+    }
+
+    private void AssignMixedChain()
+    {
+        var index = SelectedCurveShapeIndex();
+        if (index < 0)
+        {
+            _status.Text = "Выберите исходную DXF-кривую.";
+            return;
+        }
+        var kind = _kind.SelectedIndex switch
+        {
+            0 => SheetOperationKind.OpenThroughCut,
+            1 => SheetOperationKind.PerforatedCut,
+            2 => SheetOperationKind.BendReference,
+            3 => SheetOperationKind.Marking,
+            _ => SheetOperationKind.Unassigned
+        };
+        var annotation = new SheetMixedChainAnnotation(index, kind, SelectedProcessing());
+        var result = SheetMixedChainAssignmentRegister.Validate(
+            annotation, _allDxfShapes, _sheet);
+        if (result.IsValid && result.SourceIndices.Any(sourceIndex =>
+        {
+            if (_allDxfShapes[sourceIndex] is not DxfLine line)
+                return false;
+            for (var i = 0; i < _dxfLines.Count; i++)
+            {
+                if (!ReferenceEquals(_dxfLines[i], line)) continue;
+                if (_assignments.TryGet(i, out _) || _uAssignments.TryGet(i, out _))
+                    return true;
+                foreach (var old in _chainAssignments.Snapshot().Keys)
+                {
+                    var chain = DxfOpenLineChainBuilder.Build(_dxfLines, old);
+                    if (chain.IsValid && chain.SourceIndices.Contains(i))
+                        return true;
+                }
+            }
+            return false;
+        }))
+        {
+            _status.Text = "Нельзя назначить смешанную цепочку поверх уже назначенных DXF LINE.";
+            return;
+        }
+        result = _mixedAssignments.Assign(annotation, _allDxfShapes, _sheet);
+        _status.Text = result.IsValid
+            ? $"Назначена смешанная цепочка. Всего: {_mixedAssignments.Count}. " +
+              "Это только аннотация предпросмотра без CAM."
+            : "Смешанная цепочка отклонена: " + string.Join("; ", result.Issues);
+    }
+
+    private void RemoveMixedChain()
+    {
+        var selected = SelectedCurveShapeIndex();
+        if (selected < 0)
+        {
+            _status.Text = "Выберите исходную DXF-кривую.";
+            return;
+        }
+        var component = MixedOpenChainAssembler.Assemble(
+            _allDxfShapes, selected, _sheet);
+        var removed = false;
+        if (component.IsValid)
+            foreach (var anchor in _mixedAssignments.Snapshot().Keys)
+            {
+                var saved = MixedOpenChainAssembler.Assemble(
+                    _allDxfShapes, anchor, _sheet);
+                if (saved.IsValid && saved.SourceIndices.Any(
+                    component.SourceIndices.Contains))
+                    removed |= _mixedAssignments.Remove(anchor);
+            }
+        _status.Text = removed
+            ? $"Назначение снято. Смешанных цепочек осталось: {_mixedAssignments.Count}."
+            : "Для выбранной кривой нет смешанного назначения.";
+    }
+
+    private async Task SaveMixedAsync()
+    {
+        try
+        {
+            var json = SheetMixedChainSidecar.Export(
+                _allDxfShapes, _sheet, _mixedAssignments);
+            var file = await StorageProvider.SaveFilePickerAsync(
+                new FilePickerSaveOptions
+                {
+                    Title = "Сохранить смешанные назначения (отдельный JSON, не DXF)",
+                    SuggestedFileName = "ai-cutpro-mixed-operations.json",
+                    DefaultExtension = "json",
+                    FileTypeChoices =
+                    [
+                        new FilePickerFileType("JSON смешанных назначений")
+                        { Patterns = ["*.json"] }
+                    ]
+                });
+            if (file is null) return;
+            await using var stream = await file.OpenWriteAsync();
+            stream.SetLength(0);
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(json);
+            await writer.FlushAsync();
+            _status.Text = $"Сохранено смешанных цепочек: {_mixedAssignments.Count}. DXF не изменён.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                   or FormatException or NotSupportedException)
+        {
+            _status.Text = "Сохранение смешанных назначений не удалось: " + ex.Message;
+        }
+    }
+
+    private async Task LoadMixedAsync()
+    {
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(
+                new FilePickerOpenOptions
+                {
+                    Title = "Загрузить смешанные назначения для текущего DXF",
+                    AllowMultiple = false,
+                    FileTypeFilter =
+                    [
+                        new FilePickerFileType("JSON смешанных назначений")
+                        { Patterns = ["*.json"] }
+                    ]
+                });
+            if (files.Count != 1) return;
+            await using var stream = await files[0].OpenReadAsync();
+            if (stream.CanSeek && stream.Length > 8_000_000)
+                throw new FormatException("Файл смешанных назначений слишком большой.");
+            using var reader = new StreamReader(stream);
+            var buffer = new char[8_000_001];
+            var length = 0;
+            while (length < buffer.Length)
+            {
+                var count = await reader.ReadAsync(buffer.AsMemory(length));
+                if (count == 0) break;
+                length += count;
+            }
+            if (length > 8_000_000)
+                throw new FormatException("Файл смешанных назначений слишком большой.");
+            SheetMixedChainSidecar.Restore(
+                new string(buffer, 0, length), _allDxfShapes,
+                _sheet, _mixedAssignments);
+            _status.Text = $"Восстановлено смешанных цепочек: {_mixedAssignments.Count}. " +
+                "Только предпросмотр, без команд станку.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                   or FormatException or NotSupportedException)
+        {
+            _status.Text = "Загрузка смешанных назначений не удалась: " + ex.Message;
+        }
     }
 
     private void RenderMixedOpenChain()
