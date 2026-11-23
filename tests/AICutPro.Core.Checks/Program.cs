@@ -3420,4 +3420,49 @@ if(!string.IsNullOrWhiteSpace(externalDxfDirectory))
                       JsonSerializer.Serialize(manifest));
 }
 
+// B1.2: explicit session-scoped technological assignments must never edit
+// imported endpoints, silently replace an accepted operation with an invalid
+// one, or grant machine authorization.
+var lineAssignments = new SheetLineAssignmentRegister();
+var originalLineStart = new Point2(15, 35);
+var originalLineEnd = new Point2(180, 35);
+var openLineOperation = new SheetLineOperation(
+    SheetOperationKind.OpenThroughCut, originalLineStart, originalLineEnd, 5, 5);
+var assignedPreview = lineAssignments.Assign(
+    0, originalLineStart, originalLineEnd, openLineOperation, new Sheet(200, 100));
+Assert(assignedPreview.IsValid && !assignedPreview.CanGenerateMachineCommands
+    && !lineAssignments.CanGenerateMachineCommands
+    && lineAssignments.Count == 1,
+    "Explicit DXF LINE assignment remains preview-only");
+Assert(lineAssignments.TryGet(0, out var savedLineOperation)
+    && savedLineOperation == openLineOperation,
+    "DXF LINE assignment can be recovered within the editor session");
+var tamperedOperation = openLineOperation with { End = new Point2(181, 35) };
+Assert(!lineAssignments.Assign(
+    0, originalLineStart, originalLineEnd, tamperedOperation,
+    new Sheet(200, 100)).IsValid
+    && lineAssignments.TryGet(0, out savedLineOperation)
+    && savedLineOperation == openLineOperation,
+    "Modified imported endpoints cannot silently replace an assignment");
+var invalidInsetOperation = openLineOperation with { StartInsetMm = 200 };
+Assert(!lineAssignments.Assign(
+    0, originalLineStart, originalLineEnd, invalidInsetOperation,
+    new Sheet(200, 100)).IsValid
+    && lineAssignments.Count == 1,
+    "Invalid line preview does not overwrite existing valid assignment");
+Assert(!lineAssignments.Assign(
+    -1, originalLineStart, originalLineEnd, openLineOperation,
+    new Sheet(200, 100)).IsValid,
+    "Negative imported line indices are rejected");
+var bendLineOperation = openLineOperation with {
+    Kind = SheetOperationKind.BendReference
+};
+Assert(lineAssignments.Assign(1, originalLineStart, originalLineEnd,
+    bendLineOperation, new Sheet(200, 100)).IsValid
+    && lineAssignments.Count == 2,
+    "Distinct imported lines hold independent preview annotations");
+Assert(lineAssignments.Remove(0) && !lineAssignments.TryGet(0, out _)
+    && lineAssignments.Count == 1 && !lineAssignments.Remove(0),
+    "Removing a line assignment leaves other lines intact");
+
 Console.WriteLine("AI CutPro core checks passed.");
