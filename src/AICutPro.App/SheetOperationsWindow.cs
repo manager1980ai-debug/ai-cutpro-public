@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Controls.Shapes;
+using Avalonia.Platform.Storage;
 using AICutPro.Core;
 
 namespace AICutPro.App;
@@ -161,6 +162,12 @@ public sealed class SheetOperationsWindow : Window
                 $"Назначено линий: {_assignments.Count}.";
         };
         root.Children.Add(clear);
+        var saveAnnotations = new Button { Content = "Сохранить назначения отдельно (.json)" };
+        saveAnnotations.Click += async (_, _) => await SaveAnnotationsAsync();
+        root.Children.Add(saveAnnotations);
+        var loadAnnotations = new Button { Content = "Загрузить назначения (.json)" };
+        loadAnnotations.Click += async (_, _) => await LoadAnnotationsAsync();
+        root.Children.Add(loadAnnotations);
         root.Children.Add(_status);
         root.Children.Add(new ScrollViewer
         {
@@ -218,6 +225,89 @@ public sealed class SheetOperationsWindow : Window
         _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
             $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
             $"X {line.End.X:0.###}, Y {line.End.Y:0.###}. " + _status.Text;
+    }
+
+    private async Task SaveAnnotationsAsync()
+    {
+        try
+        {
+            if (_dxfLines.Count == 0)
+            {
+                _status.Text = "Сначала импортируйте DXF с объектами LINE.";
+                return;
+            }
+            var json = SheetLineAssignmentSidecar.Export(_dxfLines, _sheet, _assignments);
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Сохранить технологические назначения (не DXF)",
+                SuggestedFileName = "ai-cutpro-line-operations.json",
+                DefaultExtension = "json",
+                FileTypeChoices =
+                [
+                    new FilePickerFileType("JSON назначения") { Patterns = ["*.json"] }
+                ]
+            });
+            if (file is null) return;
+            await using var stream = await file.OpenWriteAsync();
+            stream.SetLength(0);
+            await using var writer = new StreamWriter(stream);
+            await writer.WriteAsync(json);
+            await writer.FlushAsync();
+            _status.Text = $"Сохранено назначений: {_assignments.Count}. Исходный DXF не изменён.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                   or FormatException or NotSupportedException)
+        {
+            _status.Text = "Сохранение назначений не удалось: " + ex.Message;
+        }
+    }
+
+    private async Task LoadAnnotationsAsync()
+    {
+        try
+        {
+            if (_dxfLines.Count == 0)
+            {
+                _status.Text = "Сначала откройте исходный DXF.";
+                return;
+            }
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Открыть назначения именно для текущего DXF",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("JSON назначения") { Patterns = ["*.json"] }
+                ]
+            });
+            if (files.Count != 1) return;
+            await using var stream = await files[0].OpenReadAsync();
+            if (stream.CanSeek && stream.Length > 8_000_000)
+                throw new FormatException("Файл назначений слишком большой.");
+            using var reader = new StreamReader(stream);
+            var buffer = new char[8_000_001];
+            var length = 0;
+            while (length < buffer.Length)
+            {
+                var read = await reader.ReadAsync(buffer.AsMemory(length));
+                if (read == 0) break;
+                length += read;
+            }
+            if (length > 8_000_000)
+                throw new FormatException("Файл назначений слишком большой.");
+            SheetLineAssignmentSidecar.Restore(
+                new string(buffer, 0, length), _dxfLines, _sheet, _assignments);
+            if (_sourceLine.SelectedIndex > 0)
+                ApplySelectedLine();
+            _status.Text = $"Восстановлено назначений: {_assignments.Count}. " +
+                "Исходный DXF не изменён; управление станком запрещено.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                   or FormatException or NotSupportedException)
+        {
+            _status.Text = "Загрузка отклонена: " + ex.Message +
+                ". Предыдущие назначения сохранены.";
+        }
     }
 
     private void AssignCurrentLine()
