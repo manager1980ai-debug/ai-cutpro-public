@@ -4463,4 +4463,29 @@ Assert(!DxfIndependentOpenPathReview.Inspect(
     parsedIndependent.Shapes, mixedOpenSheet).IsValid,
     "Real imported cross-layer DXF intersection is diagnosed before CAM");
 
+// B2: independent open operations may cross closed standalone boundaries.
+var closedCircleAndOpen = new DxfShape[]
+{
+    new DxfCircle("HOLE", new Point2(60, 60), 20),
+    new DxfLine("MARK", new Point2(10, 60), new Point2(110, 60))
+};
+Assert(DxfOpenClosedContactReview.Inspect(
+    closedCircleAndOpen, mixedOpenSheet).Count > 0,
+    "Independent open LINE crossing a closed CIRCLE is explicitly flagged");
+Assert(DxfOpenClosedContactReview.Inspect(
+    [closedCircleAndOpen[0],
+     new DxfLine("MARK", new Point2(10, 10), new Point2(30, 10))],
+    mixedOpenSheet).Count == 0,
+    "Open LINE separated from CIRCLE is not a false boundary collision");
+var closedSquareAndOpen = new DxfShape[]
+{
+    new DxfPolyline("CLOSED", [
+        new Point2(40, 40), new Point2(80, 40),
+        new Point2(80, 80), new Point2(40, 80)], true),
+    new DxfLine("OPEN", new Point2(20, 60), new Point2(100, 60))
+};
+Assert(DxfOpenClosedContactReview.Inspect(
+    closedSquareAndOpen, mixedOpenSheet).Count > 0,
+    "Cross-layer open LINE intersects standalone closed LWPOLYLINE");
+
 Console.WriteLine("AI CutPro core checks passed.");
