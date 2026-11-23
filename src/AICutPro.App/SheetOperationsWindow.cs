@@ -35,7 +35,8 @@ public sealed class SheetOperationsWindow : Window
     private readonly TextBlock _status;
     private readonly Canvas _drawing;
 
-    public SheetOperationsWindow(DxfImportResult? document = null, Sheet? sheet = null, int? selectedLineIndex = null)
+    public SheetOperationsWindow(DxfImportResult? document = null, Sheet? sheet = null,
+        int? selectedLineIndex = null, CutProjectDxfWorkspace? embeddedWorkspace = null)
     {
         _sheet = sheet ?? new Sheet(200, 100);
         _allDxfShapes = document?.Shapes ?? [];
@@ -136,6 +137,21 @@ public sealed class SheetOperationsWindow : Window
             Text = "Выберите назначение и нажмите «Показать предпросмотр».",
             TextWrapping = TextWrapping.Wrap
         };
+        if (embeddedWorkspace is not null)
+        {
+            // The project model has already validated exact DXF identities,
+            // but revalidate while restoring editor-local working registers.
+            SheetLineAssignmentSidecar.Restore(
+                embeddedWorkspace.LineAnnotationsJson, _dxfLines, _sheet,
+                _assignments, _uAssignments, _chainAssignments);
+            SheetMixedChainSidecar.Restore(
+                embeddedWorkspace.MixedAnnotationsJson, _allDxfShapes,
+                _sheet, _mixedAssignments);
+            RequireNoCrossAssignments();
+            _status.Text = $"Из проекта восстановлено: LINE {_assignments.Count}, " +
+                $"П-групп {_uAssignments.Count}, прямых цепочек {_chainAssignments.Count}, " +
+                $"смешанных {_mixedAssignments.Count}. Только предпросмотр.";
+        }
         _drawing = new Canvas
         {
             Width = 520,
@@ -420,6 +436,14 @@ public sealed class SheetOperationsWindow : Window
             $"не назначено: {unresolved}; ошибочные назначения: {invalid}. " +
             "Открытая линия не является автоматически дефектом, но назначение " +
             "технологии не означает готовность CAM или допуск станка.";
+    }
+
+    public CutProjectDxfWorkspace ExportEmbeddedWorkspace(string sourceAsciiDxf)
+    {
+        RequireNoCrossAssignments();
+        return CutProjectDxfWorkspaceCodec.Create(
+            sourceAsciiDxf, _sheet, _assignments, _uAssignments,
+            _chainAssignments, _mixedAssignments);
     }
 
     private void RequireNoCrossAssignments(
