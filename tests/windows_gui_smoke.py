@@ -294,15 +294,17 @@ def probe_selected_dxf_line(executable):
         selector = operation_window.descendants(control_type="ComboBox")[0]
         selector.select(1)
         for _ in range(15):
-            field_values = [field.window_text() for field in
-                            operation_window.descendants(control_type="Edit")]
-            if "15" in field_values and "35" in field_values and "180" in field_values:
+            details = [item.window_text() for item in
+                       operation_window.descendants(control_type="Text")]
+            if any("Источник DXF LINE №1" in value and "CUT_SAMPLE" in value
+                   and "X 15" in value and "X 180" in value
+                   for value in details):
                 break
             time.sleep(0.2)
         else:
             raise RuntimeError(
-                "DXF LINE selection did not populate editable coordinates: " +
-                repr(field_values))
+                "DXF LINE selection did not report imported endpoints: " +
+                repr(details))
         operation_window.close()
         print("GUI DXF LINE selection PASS: CUT_SAMPLE selected, 15/35/180 coordinates populated")
     finally:
