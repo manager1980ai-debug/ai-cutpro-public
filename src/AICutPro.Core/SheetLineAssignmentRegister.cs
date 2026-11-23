@@ -2,13 +2,22 @@ namespace AICutPro.Core;
 
 /// <summary>
 /// A document-scoped, preview-only registry of explicitly assigned DXF LINE
-/// operations. It is not persisted, and does not authorize machine motion.
-/// The caller must recreate it for every newly imported document.
+/// operations. It does not authorize machine motion. A validated snapshot
+/// may be exported and restored against the same imported line geometry.
 /// </summary>
 public sealed class SheetLineAssignmentRegister
 {
     private readonly Dictionary<int, SheetLineOperation> _assignments = new();
     public int Count => _assignments.Count;
+    public IReadOnlyDictionary<int, SheetLineOperation> Snapshot()
+        => new Dictionary<int, SheetLineOperation>(_assignments);
+
+    internal void ReplaceValidated(IReadOnlyDictionary<int, SheetLineOperation> items)
+    {
+        _assignments.Clear();
+        foreach (var pair in items)
+            _assignments.Add(pair.Key, pair.Value);
+    }
     public bool CanGenerateMachineCommands => false;
 
     public bool TryGet(int lineIndex, out SheetLineOperation? operation)
