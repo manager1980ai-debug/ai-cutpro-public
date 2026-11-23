@@ -11,7 +11,8 @@ public static class SheetOpenChainPlanner
         IReadOnlyList<Point2> vertices, Sheet sheet,
         SheetOperationKind kind, SheetLineProcessingMode processing,
         double startInsetMm = 0, double endInsetMm = 0,
-        double cutLengthMm = 0, double skipLengthMm = 0)
+        double cutLengthMm = 0, double skipLengthMm = 0,
+        bool startWithCut = true)
     {
         ArgumentNullException.ThrowIfNull(vertices);
         ArgumentNullException.ThrowIfNull(sheet);
@@ -74,9 +75,12 @@ public static class SheetOpenChainPlanner
         var end = total - endInsetMm;
         var segments = new List<SheetLinePreviewSegment>();
         var perforated = processing == SheetLineProcessingMode.PerforatedThroughCut;
-        var cut = processing == SheetLineProcessingMode.ThroughCut || perforated;
+        var cut = processing == SheetLineProcessingMode.ThroughCut ||
+            (perforated && startWithCut);
         var position = start;
-        var patternRemain = perforated ? cutLengthMm : double.PositiveInfinity;
+        var patternRemain = perforated
+            ? (startWithCut ? cutLengthMm : skipLengthMm)
+            : double.PositiveInfinity;
         while (position < end - 1e-9)
         {
             if (segments.Count >= 10_000)
