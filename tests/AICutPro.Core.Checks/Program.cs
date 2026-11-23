@@ -4361,6 +4361,34 @@ Assert(refusedInvalidReplacement &&
        projectWithDxf.DxfWorkspace?.SourceAsciiDxf == bundledAsciiDxf,
     "Even confirmed replacement rejects invalid units without mutating source");
 
+// B3 synthetic boundary corpus: numerous disjoint open LINE entities at
+// fractional millimetre coordinates. This checks stable DXF project roundtrips,
+// not independent manufacturing/CAM correctness or a real factory file corpus.
+var stressDxfBuilder = new System.Text.StringBuilder(
+    "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+    "0\nSECTION\n2\nENTITIES\n");
+for (var stressIndex = 0; stressIndex < 128; stressIndex++)
+{
+    var ordinate = (0.000001 + stressIndex * 0.75)
+        .ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+    stressDxfBuilder.Append("0\nLINE\n8\nSTRESS\n10\n10.000001\n20\n")
+        .Append(ordinate)
+        .Append("\n11\n20.000001\n21\n")
+        .Append(ordinate)
+        .Append('\n');
+}
+stressDxfBuilder.Append("0\nENDSEC\n0\nEOF\n");
+var stressDxf = stressDxfBuilder.ToString();
+var stressProject = CutProjectDxfWorkspaceCodec.ReplaceSource(
+    CutProject.CreateDefault(), stressDxf, discardExistingAssignments: false);
+var stressReopened = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(stressProject));
+var stressLoaded = CutProjectDxfWorkspaceCodec.Load(
+    stressReopened.DxfWorkspace!, stressReopened.Sheet);
+Assert(stressLoaded.Document.Shapes.Count == 128 &&
+       stressReopened.DxfWorkspace!.SourceAsciiDxf == stressDxf,
+    "128 fractional-coordinate open DXF lines survive project save/reopen intact");
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
