@@ -26,6 +26,8 @@ public partial class MainWindow : Window
     private NestingResult _result = ShelfNester.Arrange(SampleJob.Sheet, SampleJob.Parts);
     private int _step;
     private CutProject _project = CutProject.CreateDefault();
+    private int _selectedProjectPart;
+    private bool _refreshingProjectParts;
     private WorkspaceGeometry _workspace = WorkspaceGeometry.Default;
     private VirtualMachine _virtualMachine = VirtualMachine.Create(WorkspaceGeometry.Default);
     private DxfImportResult? _dxfPreview;
@@ -68,6 +70,7 @@ public partial class MainWindow : Window
                     if (candidate.DxfWorkspace is not null)
                         throw new FormatException(
                             "Embedded DXF projects are not yet supported in the main GUI.");
+                    _selectedProjectPart = 0;
                     AdoptProject(candidate);
                     StatusText.Text = $"Проект «{candidate.Name}» открыт: " +
                         $"{candidate.Parts.Count} деталей, лист " +
@@ -1926,13 +1929,97 @@ public partial class MainWindow : Window
         ProjectNameBox.Text = project.Name;
         ProjectMaterialBox.Text = project.Material;
         ProjectThicknessBox.Text = project.ThicknessMm.ToString("R", CultureInfo.InvariantCulture);
-        var part = project.Parts[0];
+        _refreshingProjectParts = true;
+        _selectedProjectPart = Math.Clamp(_selectedProjectPart, 0, project.Parts.Count - 1);
+        ProjectPartsBox.ItemsSource = project.Parts.Select((part, index) =>
+            $"{index + 1}. {part.Name} × {part.Quantity}").ToArray();
+        ProjectPartsBox.SelectedIndex = _selectedProjectPart;
+        ShowSelectedPartFields(project.Parts[_selectedProjectPart]);
+        _refreshingProjectParts = false;
+        SheetWidthBox.Text = project.Sheet.WidthMm.ToString("R", CultureInfo.InvariantCulture);
+        SheetHeightBox.Text = project.Sheet.HeightMm.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    private void ShowSelectedPartFields(Part part)
+    {
         ProjectPartNameBox.Text = part.Name;
         ProjectPartWidthBox.Text = part.WidthMm.ToString("R", CultureInfo.InvariantCulture);
         ProjectPartHeightBox.Text = part.HeightMm.ToString("R", CultureInfo.InvariantCulture);
         ProjectPartQuantityBox.Text = part.Quantity.ToString(CultureInfo.InvariantCulture);
-        SheetWidthBox.Text = project.Sheet.WidthMm.ToString("R", CultureInfo.InvariantCulture);
-        SheetHeightBox.Text = project.Sheet.HeightMm.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    private void ProjectPartSelected(object? sender, Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        if (_refreshingProjectParts || _project.Parts.Count == 0)
+            return;
+        var selected = ProjectPartsBox.SelectedIndex;
+        if (selected < 0 || selected >= _project.Parts.Count)
+            return;
+        // Switching rows never implicitly discards an uncommitted edit.
+        if (_selectedProjectPart != selected &&
+            (ProjectPartNameBox.Text != _project.Parts[_selectedProjectPart].Name ||
+             !ProjectNumber(ProjectPartWidthBox.Text, out var width) ||
+             width != _project.Parts[_selectedProjectPart].WidthMm ||
+             !ProjectNumber(ProjectPartHeightBox.Text, out var height) ||
+             height != _project.Parts[_selectedProjectPart].HeightMm ||
+             !int.TryParse(ProjectPartQuantityBox.Text, out var quantity) ||
+             quantity != _project.Parts[_selectedProjectPart].Quantity))
+        {
+            _refreshingProjectParts = true;
+            ProjectPartsBox.SelectedIndex = _selectedProjectPart;
+            _refreshingProjectParts = false;
+            StatusText.Text = "Сначала примените параметры текущей детали, затем переключайтесь.";
+            return;
+        }
+        _selectedProjectPart = selected;
+        ShowSelectedPartFields(_project.Parts[selected]);
+        StatusText.Text = $"Выбрана деталь №{selected + 1} из {_project.Parts.Count}.";
+    }
+
+    private void AddProjectPartClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is not null || _project.DxfWorkspace is not null)
+                throw new FormatException("Для DXF-проекта изменение списка деталей пока запрещено.");
+            var candidate = ReadProjectFields();
+            var parts = candidate.Parts.ToList();
+            if (parts.Count >= 10000)
+                throw new FormatException("Достигнут лимит количества деталей проекта.");
+            parts.Add(new Part($"Деталь {parts.Count + 1}", 100, 100, 1));
+            candidate = candidate with { Parts = parts };
+            CutProjectSerializer.Validate(candidate);
+            _selectedProjectPart = parts.Count - 1;
+            AdoptProject(candidate);
+            StatusText.Text = $"Добавлена деталь №{parts.Count}. Всего: {parts.Count}.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Добавление детали отклонено: " + ex.Message;
+        }
+    }
+
+    private void RemoveProjectPartClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_dxfPreview is not null || _project.DxfWorkspace is not null)
+                throw new FormatException("Для DXF-проекта изменение списка деталей пока запрещено.");
+            var candidate = ReadProjectFields();
+            if (candidate.Parts.Count <= 1)
+                throw new FormatException("Последнюю деталь удалять нельзя.");
+            var parts = candidate.Parts.ToList();
+            parts.RemoveAt(_selectedProjectPart);
+            candidate = candidate with { Parts = parts };
+            CutProjectSerializer.Validate(candidate);
+            _selectedProjectPart = Math.Min(_selectedProjectPart, parts.Count - 1);
+            AdoptProject(candidate);
+            StatusText.Text = $"Деталь удалена. Осталось: {parts.Count}.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Удаление детали отклонено: " + ex.Message;
+        }
     }
 
     private CutProject ReadProjectFields()
@@ -1945,10 +2032,9 @@ public partial class MainWindow : Window
             !int.TryParse(ProjectPartQuantityBox.Text, NumberStyles.Integer,
                 CultureInfo.InvariantCulture, out var quantity))
             throw new FormatException("Проверьте числовые размеры, толщину и количество.");
-        // Preserve any previously loaded additional parts: this first
-        // editor edits the first part, never silently deletes the others.
+        // Edit the selected row; all other parts retain their exact values.
         var parts = _project.Parts.ToList();
-        parts[0] = new Part(ProjectPartNameBox.Text?.Trim() ?? "",
+        parts[_selectedProjectPart] = new Part(ProjectPartNameBox.Text?.Trim() ?? "",
             width, height, quantity);
         var candidate = _project with
         {
@@ -2017,6 +2103,7 @@ public partial class MainWindow : Window
         {
             if (_dxfPreview is not null)
                 throw new FormatException("Открыт DXF. Завершите работу с чертежом перед созданием другого проекта.");
+            _selectedProjectPart = 0;
             AdoptProject(CutProject.CreateDefault());
             StatusText.Text = "Создан новый редактируемый проект. CAM и резка не доступны.";
         }
@@ -2090,6 +2177,7 @@ public partial class MainWindow : Window
             var loaded = CutProjectSerializer.Deserialize(new string(buffer, 0, read));
             if (loaded.DxfWorkspace is not null)
                 throw new FormatException("Проект содержит DXF. Ядро поддерживает его проверку, но основной редактор пока не восстанавливает такой чертёж. Текущий проект не изменён.");
+            _selectedProjectPart = 0;
             AdoptProject(loaded);
             StatusText.Text = $"Проект «{loaded.Name}» открыт: {loaded.Parts.Count} деталей, лист {loaded.Sheet.WidthMm:0.###} × {loaded.Sheet.HeightMm:0.###} мм.";
         }
