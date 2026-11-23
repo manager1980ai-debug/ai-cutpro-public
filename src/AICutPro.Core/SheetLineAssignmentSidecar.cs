@@ -14,9 +14,10 @@ public static class SheetLineAssignmentSidecar
     private sealed record Assignment(int Index, SheetLineOperation Operation);
     private sealed record Payload(
         int Version, double SheetWidthMm, double SheetHeightMm,
-        LineIdentity[] Lines, Assignment[] Assignments);
+        LineIdentity[] Lines, Assignment[] Assignments,
+        SheetUShapeAnnotation[]? UShapes = null);
 
-    private const int CurrentVersion = 1;
+    private const int CurrentVersion = 2;
     private const int MaximumLines = 100_000;
     private const int MaximumJsonChars = 8_000_000;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -26,7 +27,8 @@ public static class SheetLineAssignmentSidecar
 
     public static string Export(
         IReadOnlyList<DxfLine> lines, Sheet sheet,
-        SheetLineAssignmentRegister register)
+        SheetLineAssignmentRegister register,
+        SheetUShapeAssignmentRegister? uShapes = null)
     {
         ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(sheet);
@@ -43,10 +45,22 @@ public static class SheetLineAssignmentSidecar
                 item.Value.End != lines[item.Key].End)
                 throw new FormatException("Cannot export invalid line assignment.");
         }
+        var uAnnotations = uShapes?.Snapshot() ??
+            new Dictionary<int, SheetUShapeAnnotation>();
+        if (uAnnotations.Count > lines.Count)
+            throw new FormatException("Too many U-shaped annotations.");
+        var uValidator = new SheetUShapeAssignmentRegister();
+        foreach (var annotation in uAnnotations.Values)
+        {
+            if (!uValidator.Assign(annotation, lines, sheet).IsValid ||
+                annotation.BaseLineIndex < 0)
+                throw new FormatException("Cannot export invalid U-shaped annotation.");
+        }
         var payload = new Payload(CurrentVersion, sheet.WidthMm, sheet.HeightMm,
             lines.Select(x => new LineIdentity(x.Layer, x.Start, x.End)).ToArray(),
             assignments.OrderBy(x => x.Key)
-                .Select(x => new Assignment(x.Key, x.Value)).ToArray());
+                .Select(x => new Assignment(x.Key, x.Value)).ToArray(),
+            uAnnotations.Values.OrderBy(x => x.BaseLineIndex).ToArray());
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         if (json.Length > MaximumJsonChars)
             throw new FormatException("Annotation sidecar is too large.");
@@ -58,7 +72,8 @@ public static class SheetLineAssignmentSidecar
     /// </summary>
     public static void Restore(
         string json, IReadOnlyList<DxfLine> lines, Sheet sheet,
-        SheetLineAssignmentRegister register)
+        SheetLineAssignmentRegister register,
+        SheetUShapeAssignmentRegister? uShapes = null)
     {
         ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(sheet);
@@ -69,12 +84,14 @@ public static class SheetLineAssignmentSidecar
         Payload? payload;
         try { payload = JsonSerializer.Deserialize<Payload>(json, JsonOptions); }
         catch (JsonException exc) { throw new FormatException("Malformed sidecar JSON.", exc); }
-        if (payload is null || payload.Version != CurrentVersion ||
+        if (payload is null || (payload.Version != 1 && payload.Version != CurrentVersion) ||
             payload.SheetWidthMm != sheet.WidthMm ||
             payload.SheetHeightMm != sheet.HeightMm ||
             payload.Lines is null || payload.Assignments is null ||
             payload.Lines.Length != lines.Count ||
-            payload.Assignments.Length > lines.Count)
+            payload.Assignments.Length > lines.Count ||
+            (payload.UShapes?.Length ?? 0) > lines.Count ||
+            (payload.Version == 1 && payload.UShapes is { Length: > 0 }) )
             throw new FormatException("Sidecar version, dimensions or geometry count differ.");
         for (var i = 0; i < lines.Count; i++)
         {
@@ -94,7 +111,18 @@ public static class SheetLineAssignmentSidecar
                     item.Operation, sheet).IsValid)
                 throw new FormatException("Saved line operation failed validation.");
         }
+        var stagedU = new SheetUShapeAssignmentRegister();
+        foreach (var annotation in payload.UShapes ?? [])
+        {
+            if (annotation is null ||
+                stagedU.TryGet(annotation.BaseLineIndex, out _) ||
+                !stagedU.Assign(annotation, lines, sheet).IsValid)
+                throw new FormatException("Saved U-shaped annotation failed validation.");
+        }
+        // Both registers are replaced only after every line and U group
+        // has passed validation against the current DXF geometry.
         register.ReplaceValidated(staged.Snapshot());
+        uShapes?.ReplaceValidated(stagedU.Snapshot());
     }
 
     private static void CheckDocument(IReadOnlyList<DxfLine> lines, Sheet sheet)
