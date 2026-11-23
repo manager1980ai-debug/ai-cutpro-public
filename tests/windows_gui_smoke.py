@@ -236,6 +236,71 @@ def probe_open_contour_layer(executable):
 
 
 
+def probe_selected_dxf_line(executable):
+    """Real DXF LINE from a specific layer becomes the preview input."""
+    path = pathlib.Path.cwd() / "dist" / "gui_line_operation.dxf"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n"
+        "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nCUT_SAMPLE\n"
+        "10\n15\n20\n35\n11\n180\n21\n35\n0\nENDSEC\n0\nEOF\n",
+        encoding="ascii")
+    launched = subprocess.Popen([str(executable), "--open-dxf", str(path)],
+                                cwd=executable.parent)
+    try:
+        app = None
+        for _ in range(40):
+            if launched.poll() is not None:
+                raise RuntimeError("AI CutPro exited before LINE preview")
+            matches = [w for w in Desktop(backend="uia").windows()
+                       if w.process_id() == launched.pid
+                       and "AI CutPro" in w.window_text()]
+            if matches:
+                app = matches[0]
+                break
+            time.sleep(0.25)
+        if app is None:
+            raise RuntimeError("DXF LINE preview app was not found")
+        buttons = [b for b in app.descendants(control_type="Button")
+                   if b.window_text() == "Технологические линии (предпросмотр)"]
+        if len(buttons) != 1:
+            raise RuntimeError("DXF LINE preview button missing")
+        buttons[0].iface_invoke.Invoke()
+        operation_window = None
+        for _ in range(30):
+            found = [w for w in Desktop(backend="uia").windows()
+                     if w.process_id() == launched.pid
+                     and "Технологические линии" in w.window_text()]
+            if found:
+                operation_window = found[0]
+                break
+            time.sleep(0.25)
+        if operation_window is None:
+            raise RuntimeError("DXF LINE operation editor did not open")
+        entries = [x.window_text() for x in
+                   operation_window.descendants(control_type="Text")]
+        if not any("CUT_SAMPLE" in item and "15" in item and "180" in item
+                   for item in entries):
+            # A ComboBox's items may not appear as Text until the list is open.
+            combo = operation_window.descendants(control_type="ComboBox")
+            if not combo:
+                raise RuntimeError("DXF LINE selector absent")
+            combo[0].expand()
+            entries = [x.window_text() for x in
+                       operation_window.descendants(control_type="ListItem")]
+            if not any("CUT_SAMPLE" in item for item in entries):
+                raise RuntimeError("Imported DXF LINE not offered in selector")
+            combo[0].collapse()
+        operation_window.close()
+        print("GUI DXF LINE selection PASS: CUT_SAMPLE present in operation editor")
+    finally:
+        launched.terminate()
+        try:
+            launched.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            launched.kill()
+
+
 
 def main() -> None:
     # GitHub-hosted Windows consoles can default to a legacy codepage; the
@@ -280,6 +345,7 @@ def main() -> None:
                     probe_tab_navigation(window)
                     probe_malformed_dxf(executable)
                     probe_open_contour_layer(executable)
+                    probe_selected_dxf_line(executable)
                     print(
                         f"GUI smoke passed: title={window.window_text()!r}, "
                         f"pid={process.pid}, handle={window.handle}, "
