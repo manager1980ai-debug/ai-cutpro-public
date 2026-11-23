@@ -4423,4 +4423,44 @@ var sameLayerSeparated = DxfIndependentOpenPathReview.Inspect(
 Assert(sameLayerSeparated.IsValid && sameLayerSeparated.OpenComponentCount == 2,
     "Two disconnected, clearly separated same-layer components remain distinct");
 
+// A1/B1: supported bulge geometry remains preview-only but round-trips in
+// a project rather than being rejected solely for its explicit warning.
+var bulgeProjectDxf =
+    "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+    "0\nSECTION\n2\nENTITIES\n" +
+    "0\nLINE\n8\nCURVE\n10\n5\n20\n20\n11\n20\n21\n20\n" +
+    "0\nLWPOLYLINE\n8\nCURVE\n90\n2\n70\n0\n" +
+    "10\n20\n20\n20\n42\n1\n10\n60\n20\n20\n" +
+    "0\nLINE\n8\nCURVE\n10\n60\n20\n20\n11\n70\n21\n20\n" +
+    "0\nENDSEC\n0\nEOF\n";
+var bulgeProjectDocument = DxfReader.Parse(bulgeProjectDxf);
+Assert(bulgeProjectDocument.Shapes.Count == 3 &&
+    bulgeProjectDocument.Warnings.Count > 0,
+    "Bulged DXF parsing reports preview-only warning as expected");
+var bulgeProjectRegistry = new SheetMixedChainAssignmentRegister();
+Assert(bulgeProjectRegistry.Assign(
+    new SheetMixedChainAnnotation(1, SheetOperationKind.BendReference,
+        SheetLineProcessingMode.SurfaceScore),
+    bulgeProjectDocument.Shapes, mixedOpenSheet).IsValid,
+    "Imported bulge chain is eligible for a display annotation");
+var bulgeProjectBundle = CutProjectDxfWorkspaceCodec.Create(
+    bulgeProjectDxf, mixedOpenSheet, new SheetLineAssignmentRegister(),
+    new SheetUShapeAssignmentRegister(), new SheetChainAssignmentRegister(),
+    bulgeProjectRegistry);
+var bulgeProjectReopen = CutProjectDxfWorkspaceCodec.Load(
+    bulgeProjectBundle, mixedOpenSheet);
+Assert(bulgeProjectReopen.Document.Shapes.Count == 3 &&
+    bulgeProjectReopen.MixedChains.Count == 1 &&
+    !bulgeProjectReopen.MixedChains.CanGenerateMachineCommands,
+    "Bulge project preserves complete geometry and preview annotation without CAM");
+var parsedIndependent = DxfReader.Parse(
+    "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+    "0\nSECTION\n2\nENTITIES\n" +
+    "0\nLINE\n8\nLAYER_A\n10\n10\n20\n30\n11\n90\n21\n30\n" +
+    "0\nLINE\n8\nLAYER_B\n10\n50\n20\n10\n11\n50\n21\n80\n" +
+    "0\nENDSEC\n0\nEOF\n");
+Assert(!DxfIndependentOpenPathReview.Inspect(
+    parsedIndependent.Shapes, mixedOpenSheet).IsValid,
+    "Real imported cross-layer DXF intersection is diagnosed before CAM");
+
 Console.WriteLine("AI CutPro core checks passed.");
