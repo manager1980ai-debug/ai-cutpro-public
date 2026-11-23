@@ -111,6 +111,8 @@ public static class SheetLineAssignmentSidecar
                     item.Operation, sheet).IsValid)
                 throw new FormatException("Saved line operation failed validation.");
         }
+        if (uShapes is null && payload.UShapes is { Length: > 0 })
+            throw new FormatException("This loader cannot restore U-shaped groups.");
         var stagedU = new SheetUShapeAssignmentRegister();
         foreach (var annotation in payload.UShapes ?? [])
         {
