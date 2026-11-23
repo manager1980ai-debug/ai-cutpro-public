@@ -54,23 +54,7 @@ public sealed class SheetOperationsWindow : Window
                 .ToArray(),
             SelectedIndex = 0
         };
-        _sourceLine.SelectionChanged += (_, _) =>
-        {
-            var selected = _sourceLine.SelectedIndex;
-            if (selected <= 0)
-                return;
-            if (selected > _dxfLines.Count)
-                return;
-            var line = _dxfLines[selected - 1];
-            _startX.Text = line.Start.X.ToString("R", CultureInfo.InvariantCulture);
-            _startY.Text = line.Start.Y.ToString("R", CultureInfo.InvariantCulture);
-            _endX.Text = line.End.X.ToString("R", CultureInfo.InvariantCulture);
-            _endY.Text = line.End.Y.ToString("R", CultureInfo.InvariantCulture);
-            RenderPreview();
-            _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
-                $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
-                $"X {line.End.X:0.###}, Y {line.End.Y:0.###}. " + _status.Text;
-        };
+        _sourceLine.SelectionChanged += (_, _) => ApplySelectedLine();
         _startX = Field("0");
         _startY = Field("50");
         _endX = Field("200");
@@ -127,6 +111,18 @@ public sealed class SheetOperationsWindow : Window
         });
         root.Children.Add(new TextBlock { Text = "Источник линии", FontWeight = FontWeight.SemiBold });
         root.Children.Add(_sourceLine);
+        var selectByNumber = new Button { Content = "Применить DXF LINE №1" };
+        selectByNumber.Click += (_, _) =>
+        {
+            if (_dxfLines.Count == 0)
+            {
+                _status.Text = "В загруженном DXF отсутствуют отдельные объекты LINE.";
+                return;
+            }
+            _sourceLine.SelectedIndex = 1;
+            ApplySelectedLine();
+        };
+        root.Children.Add(selectByNumber);
         root.Children.Add(_kind);
         root.Children.Add(fields);
         root.Children.Add(preview);
@@ -146,6 +142,22 @@ public sealed class SheetOperationsWindow : Window
             _sourceLine.SelectedIndex = index + 1;
         else
             RenderPreview();
+    }
+
+    private void ApplySelectedLine()
+    {
+        var selected = _sourceLine.SelectedIndex;
+        if (selected <= 0 || selected > _dxfLines.Count)
+            return;
+        var line = _dxfLines[selected - 1];
+        _startX.Text = line.Start.X.ToString("R", CultureInfo.InvariantCulture);
+        _startY.Text = line.Start.Y.ToString("R", CultureInfo.InvariantCulture);
+        _endX.Text = line.End.X.ToString("R", CultureInfo.InvariantCulture);
+        _endY.Text = line.End.Y.ToString("R", CultureInfo.InvariantCulture);
+        RenderPreview();
+        _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
+            $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
+            $"X {line.End.X:0.###}, Y {line.End.Y:0.###}. " + _status.Text;
     }
 
     private static TextBox Field(string text) => new() { Text = text, Width = 112 };
