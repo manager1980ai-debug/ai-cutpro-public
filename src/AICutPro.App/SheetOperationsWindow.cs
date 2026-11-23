@@ -578,12 +578,39 @@ public sealed class SheetOperationsWindow : Window
         }
     }
 
+    private bool IsLineCoveredByMixed(int importedLineIndex)
+    {
+        if (importedLineIndex < 0 || importedLineIndex >= _dxfLines.Count)
+            return false;
+        var actualShapeIndex = -1;
+        for (var i = 0; i < _allDxfShapes.Count; i++)
+            if (ReferenceEquals(_allDxfShapes[i], _dxfLines[importedLineIndex]))
+            {
+                actualShapeIndex = i;
+                break;
+            }
+        if (actualShapeIndex < 0) return false;
+        foreach (var annotation in _mixedAssignments.Snapshot().Values)
+        {
+            var result = SheetMixedChainAssignmentRegister.Validate(
+                annotation, _allDxfShapes, _sheet);
+            if (!result.IsValid || result.SourceIndices.Contains(actualShapeIndex))
+                return true;
+        }
+        return false;
+    }
+
     private void AssignCurrentLine()
     {
         var index = _sourceLine.SelectedIndex - 1;
         if (index < 0 || index >= _dxfLines.Count)
         {
             _status.Text = "Сначала выберите импортированную DXF LINE.";
+            return;
+        }
+        if (IsLineCoveredByMixed(index))
+        {
+            _status.Text = "LINE уже включена в смешанную цепочку. Снимите назначение смешанной группы.";
             return;
         }
         if (!(Number(_startX, out var sx) && Number(_startY, out var sy)
@@ -624,6 +651,11 @@ public sealed class SheetOperationsWindow : Window
             !Number(_cut, out var cut) || !Number(_skip, out var skip))
         {
             _status.Text = "Для П-образной группы выберите DXF LINE и числовые параметры.";
+            return;
+        }
+        if (IsLineCoveredByMixed(_sourceLine.SelectedIndex - 1))
+        {
+            _status.Text = "Нельзя назначить П-образную группу поверх смешанной цепочки.";
             return;
         }
         var annotation = new SheetUShapeAnnotation(
@@ -670,7 +702,8 @@ public sealed class SheetOperationsWindow : Window
         var component = DxfOpenLineChainBuilder.Build(
             _dxfLines, annotation.SelectedLineIndex);
         if (component.IsValid && component.SourceIndices.Any(i =>
-            _assignments.TryGet(i, out _) || _uAssignments.TryGet(i, out _)))
+            _assignments.TryGet(i, out _) ||
+            _uAssignments.TryGet(i, out _) || IsLineCoveredByMixed(i)))
         {
             _status.Text = "Назначение цепочки отклонено: её линии уже имеют " +
                 "отдельные технологические операции. Снимите конфликтующие назначения.";
