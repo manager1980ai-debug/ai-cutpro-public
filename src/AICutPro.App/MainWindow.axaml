@@ -29,7 +29,11 @@
           <TextBox x:Name="ProjectNameBox" Text="Новый проект" Watermark="Название проекта"/>
           <TextBox x:Name="ProjectMaterialBox" Text="Не задан" Watermark="Материал"/>
           <TextBox x:Name="ProjectThicknessBox" Text="1" Watermark="Толщина, мм"/>
-          <TextBlock Text="Первая деталь проекта" Foreground="#E8F4FF"/>
+          <TextBlock Text="Детали проекта: выбор, добавление и удаление" Foreground="#E8F4FF" TextWrapping="Wrap"/>
+          <ComboBox x:Name="ProjectPartsBox" SelectionChanged="ProjectPartSelected"/>
+          <Button Content="Добавить деталь в проект" Click="AddProjectPartClicked"/>
+          <Button Content="Удалить выбранную деталь" Click="RemoveProjectPartClicked"/>
+          <TextBlock Text="Поля выбранной детали (примените изменения перед переключением)" Foreground="#9CB3C9" TextWrapping="Wrap"/>
           <TextBox x:Name="ProjectPartNameBox" Text="Кронштейн" Watermark="Название детали"/>
           <TextBox x:Name="ProjectPartWidthBox" Text="180" Watermark="Ширина детали, мм"/>
           <TextBox x:Name="ProjectPartHeightBox" Text="220" Watermark="Высота детали, мм"/>
