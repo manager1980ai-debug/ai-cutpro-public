@@ -17,6 +17,7 @@ public sealed class SheetOperationsWindow : Window
 {
     private readonly ComboBox _kind;
     private readonly ComboBox _processing;
+    private readonly ComboBox _preset;
     private readonly ComboBox _sourceLine;
     private readonly IReadOnlyList<DxfLine> _dxfLines;
     private readonly Sheet _sheet;
@@ -44,6 +45,19 @@ public sealed class SheetOperationsWindow : Window
                 "Прерывистый рез (Cut / Skip)",
                 "Линия будущего сгиба",
                 "Линия разметки"
+            },
+            SelectedIndex = 0
+        };
+        _preset = new ComboBox
+        {
+            ItemsSource = new[]
+            {
+                "Сплошной рез без отступов",
+                "Сплошной рез с отступами",
+                "Прерывистый рез Cut/Skip",
+                "Сгиб: только ориентир",
+                "Сгиб: сплошной сквозной рез",
+                "Сгиб: прерывистые прорези"
             },
             SelectedIndex = 0
         };
@@ -140,6 +154,11 @@ public sealed class SheetOperationsWindow : Window
                 ApplySelectedLine();
         };
         root.Children.Add(applySource);
+        root.Children.Add(new TextBlock { Text = "Параметрические шаблоны (только предпросмотр)" });
+        root.Children.Add(_preset);
+        var applyPreset = new Button { Content = "Применить шаблон к выбранной линии" };
+        applyPreset.Click += (_, _) => ApplyPreset();
+        root.Children.Add(applyPreset);
         root.Children.Add(new TextBlock { Text = "Функциональное назначение" });
         root.Children.Add(_kind);
         root.Children.Add(new TextBlock { Text = "Способ обработки (независимо от назначения)" });
@@ -307,6 +326,51 @@ public sealed class SheetOperationsWindow : Window
         {
             _status.Text = "Загрузка отклонена: " + ex.Message +
                 ". Предыдущие назначения сохранены.";
+        }
+    }
+
+    private void ApplyPreset()
+    {
+        if (_sourceLine.SelectedIndex <= 0 || _sourceLine.SelectedIndex > _dxfLines.Count)
+        {
+            _status.Text = "Сначала выберите импортированную DXF LINE.";
+            return;
+        }
+        var source = _dxfLines[_sourceLine.SelectedIndex - 1];
+        if (!Number(_startInset, out var a) || !Number(_endInset, out var b)
+            || !Number(_cut, out var cut) || !Number(_skip, out var skip))
+        {
+            _status.Text = "Шаблон отклонён: нужны числовые параметры.";
+            return;
+        }
+        try
+        {
+            var operation = SheetLinePresetLibrary.Create(
+                (SheetLinePreset)_preset.SelectedIndex,
+                source.Start, source.End, _sheet, a, b, cut, skip);
+            _kind.SelectedIndex = operation.Kind switch
+            {
+                SheetOperationKind.OpenThroughCut => 0,
+                SheetOperationKind.PerforatedCut => 1,
+                SheetOperationKind.BendReference => 2,
+                _ => -1
+            };
+            _processing.SelectedIndex = (int)operation.Processing;
+            _startX.Text = operation.Start.X.ToString("R", CultureInfo.InvariantCulture);
+            _startY.Text = operation.Start.Y.ToString("R", CultureInfo.InvariantCulture);
+            _endX.Text = operation.End.X.ToString("R", CultureInfo.InvariantCulture);
+            _endY.Text = operation.End.Y.ToString("R", CultureInfo.InvariantCulture);
+            _startInset.Text = operation.StartInsetMm.ToString("R", CultureInfo.InvariantCulture);
+            _endInset.Text = operation.EndInsetMm.ToString("R", CultureInfo.InvariantCulture);
+            _cut.Text = operation.CutLengthMm.ToString("R", CultureInfo.InvariantCulture);
+            _skip.Text = operation.SkipLengthMm.ToString("R", CultureInfo.InvariantCulture);
+            RenderPreview();
+            _status.Text = "Шаблон подготовлен. Нажмите «Назначить операцию», чтобы сохранить его в сеансе. " +
+                _status.Text;
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentOutOfRangeException)
+        {
+            _status.Text = "Шаблон отклонён: " + ex.Message;
         }
     }
 
