@@ -501,6 +501,98 @@ public partial class MainWindow : Window
         catch (Exception ex) { ReportDxfImportFailure(ex); }
     }
 
+    private async void ReplaceProjectDxfClicked(object? sender,
+        Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            if (_project.DxfWorkspace is null)
+                throw new FormatException("Сначала откройте проект со встроенным DXF.");
+            if (_activeOperationsEditor is { IsVisible: true })
+                throw new FormatException("Закройте редактор назначений перед заменой DXF.");
+
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Выбрать новый исходный DXF проекта (миллиметры)",
+                AllowMultiple = false,
+                FileTypeFilter = [new FilePickerFileType("ASCII DXF") { Patterns = ["*.dxf"] }]
+            });
+            if (files.Count != 1) return;
+
+            await using var stream = await files[0].OpenReadAsync();
+            using var data = new MemoryStream();
+            var buffer = new byte[81920];
+            int read;
+            while ((read = await stream.ReadAsync(buffer.AsMemory())) > 0)
+            {
+                if (data.Length + read > 4_000_000)
+                    throw new FormatException("Новый DXF превышает лимит 4 МБ для проекта.");
+                data.Write(buffer, 0, read);
+            }
+            var bytes = data.ToArray();
+            if (bytes.Length == 0 || bytes.Any(b => b > 127))
+                throw new FormatException(
+                    "Для безопасной замены поддерживается только непустой ASCII DXF с явными миллиметрами.");
+            var source = System.Text.Encoding.ASCII.GetString(bytes);
+            if (string.Equals(_project.DxfWorkspace.SourceAsciiDxf, source, StringComparison.Ordinal))
+            {
+                StatusText.Text = "DXF не изменился. Все назначения сохранены.";
+                return;
+            }
+
+            // Prepare and validate the replacement without changing the live
+            // project. Every old technology assignment will be discarded.
+            var candidate = CutProjectDxfWorkspaceCodec.ReplaceSource(
+                _project, source, discardExistingAssignments: true);
+            var dialog = new Window
+            {
+                Title = "AI CutPro | Замена DXF и сброс назначений",
+                Width = 490,
+                Height = 220,
+                CanResize = false,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner
+            };
+            var panel = new StackPanel { Spacing = 12, Margin = new Thickness(18) };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Исходная геометрия DXF изменится. ВСЕ прежние технологические " +
+                       "назначения LINE/U/цепочек и дуг будут удалены. " +
+                       "Новый DXF уже проверен, но назначать операции придётся заново. " +
+                       "Продолжить? Сначала сохраните резервную копию проекта, если она нужна.",
+                TextWrapping = TextWrapping.Wrap
+            });
+            var actions = new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                Spacing = 10
+            };
+            var cancel = new Button { Content = "Отменить замену" };
+            cancel.Click += (_, _) => dialog.Close(false);
+            var confirm = new Button { Content = "Заменить DXF и сбросить ВСЕ назначения" };
+            confirm.Click += (_, _) => dialog.Close(true);
+            actions.Children.Add(cancel);
+            actions.Children.Add(confirm);
+            panel.Children.Add(actions);
+            dialog.Content = panel;
+
+            if (!await dialog.ShowDialog<bool>(this))
+            {
+                StatusText.Text = "Замена отменена. Исходный DXF и назначения не изменены.";
+                return;
+            }
+            if (_activeOperationsEditor is { IsVisible: true })
+                throw new FormatException("Редактор назначений был открыт во время подтверждения.");
+            AdoptProject(candidate);
+            StatusText.Text = "DXF заменён, все прежние назначения сброшены. " +
+                              "Сохраните проект в JSON. CAM и резка запрещены.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or IOException
+                                   or UnauthorizedAccessException or NotSupportedException)
+        {
+            StatusText.Text = "Замена DXF отклонена без изменения проекта: " + ex.Message;
+        }
+    }
+
     private void ImportDxfBytes(byte[] bytes)
     {
         try
