@@ -33,7 +33,10 @@ public static class CutProjectSerializer
     public static string Serialize(CutProject project)
     {
         Validate(project);
-        return JsonSerializer.Serialize(project, Options);
+        var serialized = JsonSerializer.Serialize(project, Options);
+        if (serialized.Length > 20_000_000)
+            throw new FormatException("Файл проекта превышает допустимый размер.");
+        return serialized;
     }
 
     public static CutProject Deserialize(string json)
