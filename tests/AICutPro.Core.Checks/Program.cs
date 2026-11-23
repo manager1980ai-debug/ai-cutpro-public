@@ -4307,19 +4307,19 @@ var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
 Assert(plainCopy.DxfWorkspace is null,
     "Existing project files without DXF workspace remain compatible");
-bool RejectProject(CutProject changed)
+bool RejectBundledProject(CutProject changed)
 {
     try { CutProjectSerializer.Serialize(changed); return false; }
     catch (FormatException) { return true; }
 }
-Assert(RejectProject(projectWithDxf with
+Assert(RejectBundledProject(projectWithDxf with
 {
     DxfWorkspace = bundle with {
         SourceAsciiDxf = bundledAsciiDxf.Replace(
             "40\n20\n50\n270", "40\n21\n50\n270")
     }
 }), "Changing embedded source ARC radius rejects stale project technology");
-Assert(RejectProject(projectWithDxf with
+Assert(RejectBundledProject(projectWithDxf with
 {
     DxfWorkspace = bundle with {
         SourceAsciiDxf = bundledAsciiDxf.Replace("$INSUNITS\n70\n4", "$INSUNITS\n70\n1")
