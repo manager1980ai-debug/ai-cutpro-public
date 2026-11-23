@@ -46,6 +46,18 @@ def probe_tab_navigation(window):
     invoke(button_named("Создать новый проект"))
     assert_status("Создан новый редактируемый проект.")
     print("GUI project controls PASS: apply/create are live, open/save are present")
+    invoke(button_named("Добавить деталь в проект"))
+    assert_status("Добавлена деталь №2. Всего: 2.")
+    invoke(button_named("Применить параметры проекта"))
+    assert_status("Параметры проекта применены.")
+    invoke(button_named("Удалить выбранную деталь"))
+    assert_status("Деталь удалена. Осталось: 1.")
+    if not [c for c in window.descendants(control_type="ComboBox")
+            if c.window_text() == "1. Кронштейн × 10"]:
+        # Avalonia UIA sometimes exposes the selection on a child Text node.
+        if not any("1. Кронштейн × 10" in t for t in ui_text()):
+            raise RuntimeError("Part selector failed to return to one project part")
+    print("GUI multi-part editor PASS: add/apply/remove operations and selector")
 
     invoke(button_named("История"))
     assert_status("Раздел «История»")
