@@ -15,9 +15,10 @@ public static class SheetLineAssignmentSidecar
     private sealed record Payload(
         int Version, double SheetWidthMm, double SheetHeightMm,
         LineIdentity[] Lines, Assignment[] Assignments,
-        SheetUShapeAnnotation[]? UShapes = null);
+        SheetUShapeAnnotation[]? UShapes = null,
+        SheetChainAnnotation[]? Chains = null);
 
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 3;
     private const int MaximumLines = 100_000;
     private const int MaximumJsonChars = 8_000_000;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -28,7 +29,8 @@ public static class SheetLineAssignmentSidecar
     public static string Export(
         IReadOnlyList<DxfLine> lines, Sheet sheet,
         SheetLineAssignmentRegister register,
-        SheetUShapeAssignmentRegister? uShapes = null)
+        SheetUShapeAssignmentRegister? uShapes = null,
+        SheetChainAssignmentRegister? chains = null)
     {
         ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(sheet);
@@ -56,11 +58,20 @@ public static class SheetLineAssignmentSidecar
                 annotation.BaseLineIndex < 0)
                 throw new FormatException("Cannot export invalid U-shaped annotation.");
         }
+        var chainItems = chains?.Snapshot() ??
+            new Dictionary<int, SheetChainAnnotation>();
+        if (chainItems.Count > lines.Count)
+            throw new FormatException("Too many open-chain annotations.");
+        var chainValidator = new SheetChainAssignmentRegister();
+        foreach (var annotation in chainItems.Values)
+            if (!chainValidator.Assign(annotation, lines, sheet).IsValid)
+                throw new FormatException("Cannot export invalid open-chain annotation.");
         var payload = new Payload(CurrentVersion, sheet.WidthMm, sheet.HeightMm,
             lines.Select(x => new LineIdentity(x.Layer, x.Start, x.End)).ToArray(),
             assignments.OrderBy(x => x.Key)
                 .Select(x => new Assignment(x.Key, x.Value)).ToArray(),
-            uAnnotations.Values.OrderBy(x => x.BaseLineIndex).ToArray());
+            uAnnotations.Values.OrderBy(x => x.BaseLineIndex).ToArray(),
+            chainItems.Values.OrderBy(x => x.SelectedLineIndex).ToArray());
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         if (json.Length > MaximumJsonChars)
             throw new FormatException("Annotation sidecar is too large.");
@@ -84,13 +95,15 @@ public static class SheetLineAssignmentSidecar
         Payload? payload;
         try { payload = JsonSerializer.Deserialize<Payload>(json, JsonOptions); }
         catch (JsonException exc) { throw new FormatException("Malformed sidecar JSON.", exc); }
-        if (payload is null || (payload.Version != 1 && payload.Version != CurrentVersion) ||
+        if (payload is null || (payload.Version is not (1 or 2 or CurrentVersion)) ||
             payload.SheetWidthMm != sheet.WidthMm ||
             payload.SheetHeightMm != sheet.HeightMm ||
             payload.Lines is null || payload.Assignments is null ||
             payload.Lines.Length != lines.Count ||
             payload.Assignments.Length > lines.Count ||
             (payload.UShapes?.Length ?? 0) > lines.Count ||
+            (payload.Chains?.Length ?? 0) > lines.Count ||
+            (payload.Version < 3 && payload.Chains is { Length: > 0 }) ||
             (payload.Version == 1 && payload.UShapes is { Length: > 0 }) )
             throw new FormatException("Sidecar version, dimensions or geometry count differ.");
         for (var i = 0; i < lines.Count; i++)
@@ -121,10 +134,20 @@ public static class SheetLineAssignmentSidecar
                 !stagedU.Assign(annotation, lines, sheet).IsValid)
                 throw new FormatException("Saved U-shaped annotation failed validation.");
         }
-        // Both registers are replaced only after every line and U group
-        // has passed validation against the current DXF geometry.
+        if (chains is null && payload.Chains is { Length: > 0 })
+            throw new FormatException("This loader cannot restore open-chain groups.");
+        var stagedChains = new SheetChainAssignmentRegister();
+        foreach (var annotation in payload.Chains ?? [])
+        {
+            if (annotation is null ||
+                stagedChains.TryGet(annotation.SelectedLineIndex, out _) ||
+                !stagedChains.Assign(annotation, lines, sheet).IsValid)
+                throw new FormatException("Saved open-chain annotation failed validation.");
+        }
+        // Commit only after ALL annotation categories pass validation.
         register.ReplaceValidated(staged.Snapshot());
         uShapes?.ReplaceValidated(stagedU.Snapshot());
+        chains?.ReplaceValidated(stagedChains.Snapshot());
     }
 
     private static void CheckDocument(IReadOnlyList<DxfLine> lines, Sheet sheet)
