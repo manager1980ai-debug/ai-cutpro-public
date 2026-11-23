@@ -6,6 +6,27 @@ static void Assert(bool condition, string message)
     if (!condition) throw new Exception("CHECK FAILED: " + message);
 }
 
+// Canvas hit test for DXF LINE selection: nearest valid segment wins,
+// ambiguous/invalid or distant clicks must not silently select a cutting line.
+var hitLines = new DxfLine[]
+{
+    new("CUT_A", new Point2(10, 20), new Point2(100, 20)),
+    new("CUT_B", new Point2(10, 60), new Point2(100, 60))
+};
+Assert(DxfLinePicker.Pick(hitLines, new Point2(50, 20.5), 1) == 0,
+    "Click near first line selects first DXF LINE");
+Assert(DxfLinePicker.Pick(hitLines, new Point2(50, 59.5), 1) == 1,
+    "Click near second line selects second DXF LINE");
+Assert(DxfLinePicker.Pick(hitLines, new Point2(50, 40), 1) is null,
+    "Distant canvas click clears selection");
+Assert(DxfLinePicker.Pick(hitLines, new Point2(110, 20), 1) is null,
+    "Line endpoints are clamped, extension is not selectable");
+Assert(DxfLinePicker.Pick([hitLines[0], hitLines[0]],
+    new Point2(50, 20), 2) is null, "Coincident imported lines require disambiguation");
+Assert(DxfLinePicker.Pick(hitLines,
+    new Point2(double.NaN, 20), 2) is null,
+    "Invalid pointer cannot select geometry");
+
 // Explicit sheet-fabrication intent: open geometry is not automatically defective.
 // These operations are strictly read-only previews, never a machine command.
 var operationSheet = new Sheet(200, 100);
