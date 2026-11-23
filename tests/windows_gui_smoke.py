@@ -721,31 +721,32 @@ def probe_embedded_project_file(executable):
         if len(new_buttons) != 1:
             raise RuntimeError("New project action absent in embedded DXF session")
         new_buttons[0].iface_invoke.Invoke()
-        confirmation = None
+        cancel = None
         for _ in range(30):
-            matches = [w for w in Desktop(backend="uia").windows()
-                       if w.process_id() == proc.pid and
-                       "Подтверждение смены проекта" in w.window_text()]
-            if matches:
-                confirmation = matches[0]
+            choices = [b for b in window.descendants(control_type="Button")
+                       if b.window_text() == "Отменить смену проекта"
+                       and b.is_visible()]
+            if choices:
+                cancel = choices[0]
                 break
             time.sleep(0.2)
-        if confirmation is None:
+        if cancel is None:
             labels = [t.window_text() for t in window.descendants(control_type="Text")]
-            raise RuntimeError("Embedded DXF replacement confirmation did not appear: " +
+            raise RuntimeError("Inline project replacement confirmation missing: " +
                                repr(labels[-14:]))
-        cancel = [b for b in confirmation.descendants(control_type="Button")
-                  if b.window_text() == "Остаться в текущем проекте"]
-        if len(cancel) != 1:
-            raise RuntimeError("Project cancellation button missing")
-        cancel[0].iface_invoke.Invoke()
+        cancel.iface_invoke.Invoke()
         for _ in range(20):
-            names = [t.window_text() for t in window.descendants(control_type="Edit")]
-            if "DXF technology project" in names:
+            labels = [t.window_text() for t in window.descendants(control_type="Text")]
+            if any("Смена проекта отменена" in t for t in labels):
                 break
             time.sleep(0.2)
         else:
-            raise RuntimeError("Cancelling project switch erased the embedded project")
+            raise RuntimeError("Project cancellation was not acknowledged")
+        # The DXF preview remains active after cancel; use its own details,
+        # not incidental Edit control text that UIA backends may omit.
+        after_cancel = [t.window_text() for t in window.descendants(control_type="Text")]
+        if not any("DXF: щёлкните по прямой LINE" in t for t in after_cancel):
+            raise RuntimeError("Cancelling replacement unexpectedly removed DXF geometry")
         print("GUI project safety PASS: cancel preserves embedded DXF state")
     finally:
         proc.terminate()
