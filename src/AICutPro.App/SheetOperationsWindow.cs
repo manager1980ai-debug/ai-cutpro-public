@@ -21,6 +21,8 @@ public sealed class SheetOperationsWindow : Window
     private readonly ComboBox _chainDirection;
     private readonly ComboBox _chainFirstPhase;
     private readonly ComboBox _sourceLine;
+    private readonly ComboBox _sourceCurve;
+    private readonly IReadOnlyList<DxfShape> _curves;
     private readonly IReadOnlyList<DxfLine> _dxfLines;
     private readonly Sheet _sheet;
     private readonly SheetLineAssignmentRegister _assignments = new();
@@ -35,6 +37,9 @@ public sealed class SheetOperationsWindow : Window
     {
         _sheet = sheet ?? new Sheet(200, 100);
         _dxfLines = document?.Shapes.OfType<DxfLine>().ToArray() ?? [];
+        _curves = document?.Shapes.Where(x => x is DxfArc
+            or DxfPolyline { Closed: false }
+            or DxfBulgedPolyline { Closed: false }).ToArray() ?? [];
         Title = "AI CutPro | Технологические линии (предпросмотр)";
         Width = 870;
         Height = 640;
@@ -106,6 +111,14 @@ public sealed class SheetOperationsWindow : Window
             SelectedIndex = 0
         };
         _sourceLine.SelectionChanged += (_, _) => ApplySelectedLine();
+        _sourceCurve = new ComboBox
+        {
+            ItemsSource = new[] { "Выберите открытый ARC/POLYLINE" }
+                .Concat(_curves.Select((curve, index) =>
+                    $"{index + 1}. {curve.GetType().Name} | слой {curve.Layer}"))
+                .ToArray(),
+            SelectedIndex = 0
+        };
         _startX = Field("0");
         _startY = Field("50");
         _endX = Field("200");
@@ -196,6 +209,18 @@ public sealed class SheetOperationsWindow : Window
         };
         chainPreview.Click += (_, _) => RenderConnectedChain();
         root.Children.Add(chainPreview);
+        root.Children.Add(new TextBlock
+        {
+            Text = "Открытые дуги ARC и POLYLINE/bulge (только изображение)",
+            FontWeight = FontWeight.SemiBold
+        });
+        root.Children.Add(_sourceCurve);
+        var curvePreview = new Button
+        {
+            Content = "Предпросмотр открытой DXF-дуги/полилинии"
+        };
+        curvePreview.Click += (_, _) => RenderOpenCurve();
+        root.Children.Add(curvePreview);
         var assignChain = new Button { Content = "Назначить открытую цепочку (группа)" };
         assignChain.Click += (_, _) => AssignConnectedChain();
         root.Children.Add(assignChain);
@@ -618,6 +643,48 @@ public sealed class SheetOperationsWindow : Window
         _status.Text = removed
             ? $"Назначение цепочки удалено. Осталось цепочек: {_chainAssignments.Count}."
             : "Для выбранной DXF LINE нет назначенной цепочки.";
+    }
+
+    private void RenderOpenCurve()
+    {
+        var index = _sourceCurve.SelectedIndex - 1;
+        if (index < 0 || index >= _curves.Count)
+        {
+            _status.Text = "Выберите импортированный ARC или открытую POLYLINE.";
+            return;
+        }
+        var preview = DxfOpenCurveInspector.Inspect(_curves[index], _sheet);
+        _drawing.Children.Clear();
+        if (!preview.IsValid)
+        {
+            _status.Text = "Предпросмотр кривой отклонён: " +
+                string.Join("; ", preview.Issues);
+            return;
+        }
+        var border = new Rectangle
+        {
+            Width = 480, Height = 240, Stroke = Brushes.SlateGray,
+            StrokeThickness = 2, Fill = Brushes.Transparent
+        };
+        Canvas.SetLeft(border, 20);
+        Canvas.SetTop(border, 15);
+        _drawing.Children.Add(border);
+        var scale = Math.Min(480 / _sheet.WidthMm, 240 / _sheet.HeightMm);
+        for (var i = 1; i < preview.DisplayVertices.Count; i++)
+        {
+            var start = preview.DisplayVertices[i - 1];
+            var end = preview.DisplayVertices[i];
+            _drawing.Children.Add(new Line
+            {
+                StartPoint = new Point(20 + start.X * scale, 255 - start.Y * scale),
+                EndPoint = new Point(20 + end.X * scale, 255 - end.Y * scale),
+                Stroke = Brushes.SteelBlue,
+                StrokeThickness = 2
+            });
+        }
+        _status.Text = $"Предпросмотр кривой: {_curves[index].GetType().Name}; " +
+            $"аналитическая длина {preview.SourceLengthMm:0.###} мм. " +
+            "Точки нужны только для изображения: Cut/Skip, G-code и управление станком недоступны.";
     }
 
     private void RenderConnectedChain()
