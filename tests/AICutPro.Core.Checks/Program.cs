@@ -3977,4 +3977,53 @@ Assert(restoredV2U.Count == 1 &&
     restoredV2UAnnotation == uAssigned,
     "V2 sidecar with U-shaped operations remains readable under V3");
 
+// B1.2: an open chain need not be closed to be intentional, but crossing,
+// retracing and T-contact are ambiguous and must block preview/persistence.
+var crossingVertices = new Point2[]
+{
+    new(10, 10), new(90, 90), new(10, 90), new(90, 10)
+};
+Assert(OpenChainIntersectionCheck.Inspect(crossingVertices).Count > 0 &&
+    !SheetOpenChainPlanner.Inspect(crossingVertices, chainSheet,
+        SheetOperationKind.OpenThroughCut,
+        SheetLineProcessingMode.ThroughCut).IsValid,
+    "Interior crossing of non-neighboring open edges blocks technology");
+var touchingVertices = new Point2[]
+{
+    new(10, 10), new(90, 10), new(90, 90), new(50, 10)
+};
+Assert(OpenChainIntersectionCheck.Inspect(touchingVertices).Count > 0,
+    "A later endpoint landing on an earlier segment is a T-contact");
+var retracedVertices = new Point2[]
+{
+    new(10, 10), new(90, 10), new(50, 10)
+};
+Assert(OpenChainIntersectionCheck.Inspect(retracedVertices).Count > 0,
+    "Immediate retrace at an adjacent joint is not a valid open path");
+var forwardCollinear = new Point2[]
+{
+    new(10, 10), new(60, 10), new(90, 10)
+};
+Assert(OpenChainIntersectionCheck.Inspect(forwardCollinear).Count == 0 &&
+    SheetOpenChainPlanner.Inspect(forwardCollinear, chainSheet,
+        SheetOperationKind.OpenThroughCut,
+        SheetLineProcessingMode.ThroughCut).IsValid,
+    "Forward collinear adjacent edges are legitimate open geometry");
+Assert(OpenChainIntersectionCheck.Inspect(rightAngleChain).Count == 0,
+    "A normal connected right-angle open path is not a defect");
+var crossingImported = new DxfLine[]
+{
+    new("CUT", crossingVertices[0], crossingVertices[1]),
+    new("CUT", crossingVertices[1], crossingVertices[2]),
+    new("CUT", crossingVertices[2], crossingVertices[3])
+};
+Assert(!DxfOpenLineChainBuilder.Build(crossingImported, 0).IsValid,
+    "Imported LINE chain rejects mid-segment crossings, not just branches");
+var crossingRegistry = new SheetChainAssignmentRegister();
+Assert(!crossingRegistry.Assign(
+    new SheetChainAnnotation(0, false, SheetOperationKind.OpenThroughCut,
+        SheetLineProcessingMode.ThroughCut),
+    crossingImported, chainSheet).IsValid && crossingRegistry.Count == 0,
+    "An invalid crossing cannot be stored as a saved chain");
+
 Console.WriteLine("AI CutPro core checks passed.");
