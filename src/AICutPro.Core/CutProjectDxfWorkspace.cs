@@ -131,6 +131,29 @@ public static class CutProjectDxfWorkspaceCodec
             parsed.InsUnits != 4 || unknownWarnings.Length > 0)
             throw new FormatException(
                 "Embedded DXF must contain supported entities, declare millimetres and have no unsupported import warnings.");
+        // The project file is durable state, not an unrestricted diagnostic dump.
+        // Very large finite coordinates/radii lead to overflow or catastrophic
+        // precision loss in subsequent preview operations. Keep this bound in
+        // sync with GeometryPreflight's default maximumCoordinateMm.
+        const double maximumSourceCoordinateMm = 1_000_000;
+        static bool Bounded(double value) =>
+            double.IsFinite(value) && Math.Abs(value) <= maximumSourceCoordinateMm;
+        static bool BoundedPoint(Point2 point) =>
+            Bounded(point.X) && Bounded(point.Y);
+        var outOfRange = parsed.Shapes.Any(shape => shape switch
+        {
+            DxfLine line => !BoundedPoint(line.Start) || !BoundedPoint(line.End),
+            DxfCircle circle => !BoundedPoint(circle.Center) ||
+                                !Bounded(circle.Radius),
+            DxfArc arc => !BoundedPoint(arc.Center) || !Bounded(arc.Radius) ||
+                          !double.IsFinite(arc.StartDeg) || !double.IsFinite(arc.EndDeg),
+            DxfPolyline polyline => polyline.Vertices.Any(point => !BoundedPoint(point)),
+            DxfBulgedPolyline bulged => bulged.Vertices.Any(point => !BoundedPoint(point)),
+            _ => true
+        });
+        if (outOfRange)
+            throw new FormatException(
+                "Embedded DXF has unsupported or out-of-range geometry (maximum 1000000 mm).");
         return parsed;
     }
 }

@@ -4494,6 +4494,36 @@ Assert(ambiguousReplacementRefused &&
        projectWithDxf.DxfWorkspace!.SourceAsciiDxf == bundledAsciiDxf,
     "Ambiguous duplicate scalar groups reject entire replacement without mutation");
 
+// B3/A1: a syntactically valid DXF with finite but enormous geometry may be
+// previewed diagnostically, but must not become durable project state.
+// The millimetre project bound matches GeometryPreflight's standard policy.
+var atCoordinateBoundary = CutProjectDxfWorkspaceCodec.ReplaceSource(
+    CutProject.CreateDefault(),
+    SyntheticLineDxf(1).Replace("10\n1.000001", "10\n1000000"),
+    discardExistingAssignments: false);
+Assert(atCoordinateBoundary.DxfWorkspace is not null,
+    "Exactly 1,000,000 mm is the permitted embedded DXF coordinate boundary");
+foreach (var outOfRangeDxf in new[]
+{
+    SyntheticLineDxf(1).Replace("10\n1.000001", "10\n1000000.000001"),
+    SyntheticLineDxf(1).Replace("10\n1.000001", "10\n-1000000.000001"),
+    SyntheticLineDxf(1).Replace("10\n1.000001", "10\n1e308"),
+    newSourceDxf.Replace("40\n20\n50\n270", "40\n1000001\n50\n270")
+})
+{
+    var rejectedUnboundedSource = false;
+    try
+    {
+        _ = CutProjectDxfWorkspaceCodec.ReplaceSource(
+            projectWithDxf, outOfRangeDxf, discardExistingAssignments: true);
+    }
+    catch (FormatException) { rejectedUnboundedSource = true; }
+    Assert(rejectedUnboundedSource &&
+           projectWithDxf.DxfWorkspace!.SourceAsciiDxf == bundledAsciiDxf &&
+           projectWithDxf.DxfWorkspace!.MixedAnnotationsJson == bundle.MixedAnnotationsJson,
+        "Out-of-range DXF cannot replace geometry or affect existing assignments");
+}
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
