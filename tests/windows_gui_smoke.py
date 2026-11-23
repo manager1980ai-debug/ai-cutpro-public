@@ -705,6 +705,16 @@ def probe_embedded_project_file(executable):
                    for value in labels):
             raise RuntimeError("Saved ARC technology was not restored: " + repr(labels))
         editor.close()
+        for _ in range(30):
+            main_labels = [t.window_text() for t in
+                           window.descendants(control_type="Text")]
+            if any("Назначения DXF сохранены в текущем проекте" in t
+                   for t in main_labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Technology editor did not finish closing: " +
+                               repr(main_labels[-12:]))
         print("GUI embedded DXF project PASS: original geometry and ARC annotation restored")
         new_buttons = [b for b in window.descendants(control_type="Button")
                        if b.window_text() == "Создать новый проект"]
@@ -721,7 +731,9 @@ def probe_embedded_project_file(executable):
                 break
             time.sleep(0.2)
         if confirmation is None:
-            raise RuntimeError("Embedded DXF replacement confirmation did not appear")
+            labels = [t.window_text() for t in window.descendants(control_type="Text")]
+            raise RuntimeError("Embedded DXF replacement confirmation did not appear: " +
+                               repr(labels[-14:]))
         cancel = [b for b in confirmation.descendants(control_type="Button")
                   if b.window_text() == "Остаться в текущем проекте"]
         if len(cancel) != 1:
