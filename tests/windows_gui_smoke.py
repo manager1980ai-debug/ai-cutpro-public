@@ -291,8 +291,11 @@ def probe_selected_dxf_line(executable):
             if not any("CUT_SAMPLE" in item for item in entries):
                 raise RuntimeError("Imported DXF LINE not offered in selector")
             combo[0].collapse()
-        selector = operation_window.descendants(control_type="ComboBox")[0]
-        selector.select(1)
+        select_first = [button for button in operation_window.descendants(control_type="Button")
+                        if button.window_text() == "Применить DXF LINE №1"]
+        if len(select_first) != 1:
+            raise RuntimeError("DXF LINE explicit selection button missing")
+        select_first[0].iface_invoke.Invoke()
         for _ in range(15):
             details = [item.window_text() for item in
                        operation_window.descendants(control_type="Text")]
