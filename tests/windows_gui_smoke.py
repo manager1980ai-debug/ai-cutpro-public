@@ -360,6 +360,30 @@ def probe_selected_dxf_line(executable):
             time.sleep(0.2)
         else:
             raise RuntimeError("Connected DXF LINE chain did not preview in GUI")
+        chain_assign = [b for b in operation_window.descendants(control_type="Button")
+                        if b.window_text() == "Назначить открытую цепочку (группа)"]
+        chain_clear = [b for b in operation_window.descendants(control_type="Button")
+                       if b.window_text() == "Снять назначение цепочки"]
+        if len(chain_assign) != 1 or len(chain_clear) != 1:
+            raise RuntimeError("Chain assignment or removal action missing")
+        chain_assign[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Сохранено цепочек: 1" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Connected DXF chain was not assigned")
+        chain_clear[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Осталось цепочек: 0" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Connected DXF chain was not removed")
         assign_buttons = [b for b in operation_window.descendants(control_type="Button")
                           if b.window_text() == "Назначить операцию выбранной DXF LINE (сеанс)"]
         if len(assign_buttons) != 1:
