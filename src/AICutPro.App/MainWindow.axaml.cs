@@ -505,6 +505,10 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (_project.DxfWorkspace is not null ||
+                _activeOperationsEditor is { IsVisible: true })
+                throw new FormatException(
+                    "Импорт не должен заменять DXF и назначения открытого проекта.");
             _dxfDiagnostics = [];
             if (bytes.Length is <= 0 or > 8_000_000)
                 throw new FormatException("DXF file must contain 1..8000000 bytes.");
@@ -1933,6 +1937,12 @@ public partial class MainWindow : Window
     private void CanvasSizeChanged(object? sender, SizeChangedEventArgs e) => RenderSheet();
     private void NewLayoutClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        if (_project.DxfWorkspace is not null ||
+            _activeOperationsEditor is { IsVisible: true })
+        {
+            StatusText.Text = "Новый раскрой не заменяет DXF-проект с назначениями. Сначала сохраните проект.";
+            return;
+        }
         _step = 0;
         _dxfPreview = null;
         _dxfHistory = null;
