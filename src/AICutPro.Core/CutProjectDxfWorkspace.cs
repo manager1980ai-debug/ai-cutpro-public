@@ -83,10 +83,16 @@ public static class CutProjectDxfWorkspaceCodec
         {
             throw new FormatException("Embedded DXF cannot be parsed.", ex);
         }
+        // The importer uses these precise warnings for analytically
+        // represented bulge arcs which remain display-only. They do not mean
+        // that shapes were skipped. Any other warning still blocks embedding.
+        var unknownWarnings = parsed.Warnings.Where(w => w is not
+            ("Bulged LWPOLYLINE is preview-only: CAD/CAM geometry is not yet certified." or
+             "Legacy bulged POLYLINE is preview-only: CAD/CAM not certified.")).ToArray();
         if (parsed.Shapes.Count is < 1 or > 1000 ||
-            parsed.InsUnits != 4 || parsed.Warnings.Count > 0)
+            parsed.InsUnits != 4 || unknownWarnings.Length > 0)
             throw new FormatException(
-                "Embedded DXF must contain supported entities, declare millimetres and have no import warnings.");
+                "Embedded DXF must contain supported entities, declare millimetres and have no unsupported import warnings.");
         return parsed;
     }
 }
