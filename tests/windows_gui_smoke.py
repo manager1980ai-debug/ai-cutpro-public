@@ -245,10 +245,10 @@ def probe_selected_dxf_line(executable):
         "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nCUT_SAMPLE\n"
         "10\n15\n20\n35\n11\n180\n21\n35\n"
         "0\nLINE\n8\nCUT_SAMPLE\n10\n180\n20\n35\n11\n180\n21\n75\n"
-        "0\\nARC\\n8\\nCURVES\\n10\\n60\\n20\\n50\\n40\\n20\\n50\\n0\\n51\\n90\\n"
-        "0\\nLWPOLYLINE\\n8\\nCURVES\\n90\\n2\\n70\\n0\\n"
-        "10\\n20\\n20\\n20\\n42\\n1\\n10\\n60\\n20\\n20\\n"
-        "0\\nENDSEC\\n0\\nEOF\\n",
+        "0\nARC\n8\nCURVES\n10\n60\n20\n50\n40\n20\n50\n0\n51\n90\n"
+        "0\nLWPOLYLINE\n8\nCURVES\n90\n2\n70\n0\n"
+        "10\n20\n20\n20\n42\n1\n10\n60\n20\n20\n"
+        "0\nENDSEC\n0\nEOF\n",
         encoding="ascii")
     launched = subprocess.Popen([str(executable), "--open-dxf", str(path)],
                                 cwd=executable.parent)
