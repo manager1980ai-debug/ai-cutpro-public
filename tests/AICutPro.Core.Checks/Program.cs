@@ -4512,4 +4512,15 @@ Assert(editedRoundtrip == editedProject ||
         editedRoundtrip.ThicknessMm == editedProject.ThicknessMm),
     "Project edit/JSON roundtrip preserves both first and additional parts");
 
+// The GUI fixture is emitted from the validated public project codec,
+ // never hand-assembled JSON. It is disposable CI data, not a repo asset.
+var projectFixtureDirectory = Environment.GetEnvironmentVariable("AI_CUTPRO_CI_DXF_DIR");
+if (!string.IsNullOrWhiteSpace(projectFixtureDirectory))
+{
+    Directory.CreateDirectory(projectFixtureDirectory);
+    File.WriteAllText(
+        Path.Combine(projectFixtureDirectory, "embedded_gui_project.json"),
+        CutProjectSerializer.Serialize(projectWithDxf));
+}
+
 Console.WriteLine("AI CutPro core checks passed.");
