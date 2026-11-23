@@ -167,6 +167,12 @@ public sealed class SheetOperationsWindow : Window
         root.Children.Add(_processing);
         root.Children.Add(fields);
         root.Children.Add(preview);
+        var chainPreview = new Button
+        {
+            Content = "Предпросмотр связанной цепочки DXF LINE"
+        };
+        chainPreview.Click += (_, _) => RenderConnectedChain();
+        root.Children.Add(chainPreview);
         var uOptions = new StackPanel { Spacing = 4 };
         uOptions.Children.Add(new TextBlock
         {
@@ -488,6 +494,71 @@ public sealed class SheetOperationsWindow : Window
         _status.Text = result.IsValid
             ? $"П-образная группа назначена. Групп: {_uAssignments.Count}. Сохраните JSON, чтобы восстановить её позже."
             : "П-образная группа отклонена: " + string.Join("; ", result.Issues);
+    }
+
+    private void RenderConnectedChain()
+    {
+        var selected = _sourceLine.SelectedIndex - 1;
+        if (selected < 0 || selected >= _dxfLines.Count)
+        {
+            _status.Text = "Сначала выберите импортированную DXF LINE.";
+            return;
+        }
+        var chain = DxfOpenLineChainBuilder.Build(_dxfLines, selected);
+        if (!chain.IsValid)
+        {
+            _status.Text = "Цепочка не построена: " + string.Join("; ", chain.Issues);
+            return;
+        }
+        if (!Number(_startInset, out var a) || !Number(_endInset, out var b) ||
+            !Number(_cut, out var cut) || !Number(_skip, out var skip))
+        {
+            _status.Text = "Введите числовые параметры цепочки.";
+            return;
+        }
+        var kind = _kind.SelectedIndex switch
+        {
+            0 => SheetOperationKind.OpenThroughCut,
+            1 => SheetOperationKind.PerforatedCut,
+            2 => SheetOperationKind.BendReference,
+            3 => SheetOperationKind.Marking,
+            _ => SheetOperationKind.Unassigned
+        };
+        var treatment = SelectedProcessing();
+        if (treatment != SheetLineProcessingMode.PerforatedThroughCut)
+            cut = skip = 0;
+        var result = SheetOpenChainPlanner.Inspect(
+            chain.Vertices, _sheet, kind, treatment, a, b, cut, skip);
+        if (!result.IsValid)
+        {
+            _status.Text = "Цепочка отклонена: " + string.Join("; ", result.Issues);
+            return;
+        }
+        _drawing.Children.Clear();
+        var rectangle = new Rectangle
+        {
+            Width = 480, Height = 240, Stroke = Brushes.SlateGray,
+            StrokeThickness = 2, Fill = Brushes.Transparent
+        };
+        Canvas.SetLeft(rectangle, 20);
+        Canvas.SetTop(rectangle, 15);
+        _drawing.Children.Add(rectangle);
+        var scale = Math.Min(480 / _sheet.WidthMm, 240 / _sheet.HeightMm);
+        foreach (var segment in result.Segments)
+        {
+            _drawing.Children.Add(new Line
+            {
+                StartPoint = new Point(20 + segment.Start.X * scale,
+                    255 - segment.Start.Y * scale),
+                EndPoint = new Point(20 + segment.End.X * scale,
+                    255 - segment.End.Y * scale),
+                Stroke = segment.IsCut ? Brushes.IndianRed : Brushes.SteelBlue,
+                StrokeThickness = segment.IsCut ? 3 : 2
+            });
+        }
+        _status.Text = $"Предпросмотр цепочки: {chain.SourceIndices.Count} DXF LINE, " +
+            $"{result.Segments.Count} технологических сегментов. " +
+            "Только предпросмотр, назначения цепочки ещё не сохраняются; CAM запрещён.";
     }
 
     private void RenderUPreview()
