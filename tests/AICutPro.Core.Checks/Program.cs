@@ -3506,4 +3506,53 @@ Assert(!bendThroughPreview.CanGenerateMachineCommands
     && !bendSurfacePreview.CanGenerateMachineCommands,
     "Processing previews never grant machine permission");
 
+// Versioned, geometry-bound annotation sidecar: no silent transfer to a
+// different DXF, no partial restore on corrupt input.
+var sidecarLines = new DxfLine[]
+{
+    new("CUT_A", new Point2(15, 35), new Point2(180, 35)),
+    new("BEND_B", new Point2(15, 55), new Point2(180, 55))
+};
+var sidecarSheet = new Sheet(200, 100);
+var sourceAnnotations = new SheetLineAssignmentRegister();
+var bendAnnotation = new SheetLineOperation(
+    SheetOperationKind.BendReference, sidecarLines[1].Start,
+    sidecarLines[1].End, 5, 5, 3, 2,
+    SheetLineProcessingMode.PerforatedThroughCut);
+Assert(sourceAnnotations.Assign(1, sidecarLines[1].Start,
+    sidecarLines[1].End, bendAnnotation, sidecarSheet).IsValid,
+    "Bend through-perforation can be assigned before persistence");
+var sidecarJson = SheetLineAssignmentSidecar.Export(
+    sidecarLines, sidecarSheet, sourceAnnotations);
+var restoredAnnotations = new SheetLineAssignmentRegister();
+SheetLineAssignmentSidecar.Restore(
+    sidecarJson, sidecarLines, sidecarSheet, restoredAnnotations);
+Assert(restoredAnnotations.Count == 1 &&
+    restoredAnnotations.TryGet(1, out var restoredBend) &&
+    restoredBend == bendAnnotation && !restoredAnnotations.CanGenerateMachineCommands,
+    "Sidecar round-trip retains independent bend treatment but no machine access");
+bool SidecarRejects(string json, IReadOnlyList<DxfLine> lines, Sheet sheet)
+{
+    try
+    {
+        SheetLineAssignmentSidecar.Restore(
+            json, lines, sheet, restoredAnnotations);
+        return false;
+    }
+    catch (FormatException) { return true; }
+}
+Assert(SidecarRejects(sidecarJson,
+    [new DxfLine("CUT_A", sidecarLines[0].Start, sidecarLines[0].End),
+     new DxfLine("OTHER", sidecarLines[1].Start, sidecarLines[1].End)],
+    sidecarSheet), "Sidecar refuses changed DXF layer identity");
+Assert(SidecarRejects(sidecarJson, sidecarLines, new Sheet(220, 100)),
+    "Sidecar refuses changed sheet dimensions");
+Assert(SidecarRejects("not-json", sidecarLines, sidecarSheet),
+    "Sidecar refuses malformed JSON");
+Assert(SidecarRejects(sidecarJson.Replace("\\"Version\\":1", "\\"Version\\":999"),
+    sidecarLines, sidecarSheet), "Sidecar refuses unknown schema versions");
+Assert(restoredAnnotations.Count == 1 &&
+    restoredAnnotations.TryGet(1, out restoredBend) && restoredBend == bendAnnotation,
+    "All failed sidecar restores retain prior accepted annotations");
+
 Console.WriteLine("AI CutPro core checks passed.");
