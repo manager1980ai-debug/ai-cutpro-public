@@ -4389,6 +4389,41 @@ Assert(stressLoaded.Document.Shapes.Count == 128 &&
        stressReopened.DxfWorkspace!.SourceAsciiDxf == stressDxf,
     "128 fractional-coordinate open DXF lines survive project save/reopen intact");
 
+// B3 entity-count boundary: accept the supported maximum; reject one more.
+// Exercise the same import/embedding gate used by project opening.
+static string SyntheticLineDxf(int count)
+{
+    var builder = new System.Text.StringBuilder(
+        "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+        "0\nSECTION\n2\nENTITIES\n");
+    for (int index = 0; index < count; index++)
+    {
+        var x = (1.000001 + index * 0.25)
+            .ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        builder.Append("0\nLINE\n8\nB3\n10\n")
+            .Append(x).Append("\n20\n0.000001\n11\n")
+            .Append(x).Append("\n21\n1.000001\n");
+    }
+    return builder.Append("0\nENDSEC\n0\nEOF\n").ToString();
+}
+var supportedBoundary = CutProjectDxfWorkspaceCodec.ReplaceSource(
+    CutProject.CreateDefault(), SyntheticLineDxf(1000),
+    discardExistingAssignments: false);
+Assert(CutProjectDxfWorkspaceCodec.Load(
+    supportedBoundary.DxfWorkspace!, supportedBoundary.Sheet)
+    .Document.Shapes.Count == 1000,
+    "Exactly 1000 DXF entities fit the documented project limit");
+var rejectedExcessEntities = false;
+try
+{
+    _ = CutProjectDxfWorkspaceCodec.ReplaceSource(
+        CutProject.CreateDefault(), SyntheticLineDxf(1001),
+        discardExistingAssignments: false);
+}
+catch (FormatException) { rejectedExcessEntities = true; }
+Assert(rejectedExcessEntities,
+    "1001 DXF entities are rejected without truncating the project");
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
