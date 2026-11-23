@@ -15,13 +15,18 @@ namespace AICutPro.App;
 public sealed class SheetOperationsWindow : Window
 {
     private readonly ComboBox _kind;
+    private readonly ComboBox _sourceLine;
+    private readonly IReadOnlyList<DxfLine> _dxfLines;
+    private readonly Sheet _sheet;
     private readonly TextBox _startX, _startY, _endX, _endY;
     private readonly TextBox _startInset, _endInset, _cut, _skip;
     private readonly TextBlock _status;
     private readonly Canvas _drawing;
 
-    public SheetOperationsWindow()
+    public SheetOperationsWindow(DxfImportResult? document = null, Sheet? sheet = null)
     {
+        _sheet = sheet ?? new Sheet(200, 100);
+        _dxfLines = document?.Shapes.OfType<DxfLine>().ToArray() ?? [];
         Title = "AI CutPro | Технологические линии (предпросмотр)";
         Width = 870;
         Height = 640;
@@ -38,6 +43,29 @@ public sealed class SheetOperationsWindow : Window
                 "Линия разметки"
             },
             SelectedIndex = 0
+        };
+        _sourceLine = new ComboBox
+        {
+            ItemsSource = new[] { "Пример: X 0–200, Y 50" }
+                .Concat(_dxfLines.Select((line, index) =>
+                    $"DXF LINE №{index + 1} | слой {line.Layer} | " +
+                    $"({line.Start.X:0.###}; {line.Start.Y:0.###}) → " +
+                    $"({line.End.X:0.###}; {line.End.Y:0.###})"))
+                .ToArray(),
+            SelectedIndex = 0
+        };
+        _sourceLine.SelectionChanged += (_, _) =>
+        {
+            if (_sourceLine.SelectedIndex is not int selected || selected <= 0)
+                return;
+            if (selected > _dxfLines.Count)
+                return;
+            var line = _dxfLines[selected - 1];
+            _startX.Text = line.Start.X.ToString("R", CultureInfo.InvariantCulture);
+            _startY.Text = line.Start.Y.ToString("R", CultureInfo.InvariantCulture);
+            _endX.Text = line.End.X.ToString("R", CultureInfo.InvariantCulture);
+            _endY.Text = line.End.Y.ToString("R", CultureInfo.InvariantCulture);
+            RenderPreview();
         };
         _startX = Field("0");
         _startY = Field("50");
@@ -89,9 +117,12 @@ public sealed class SheetOperationsWindow : Window
         });
         root.Children.Add(new TextBlock
         {
-            Text = "Пример листа 200 × 100 мм. Исходная линия и её назначение отделены друг от друга. Пунктир в DXF сам по себе не является командой резки.",
+            Text = $"Рабочий лист {_sheet.WidthMm:0.###} × {_sheet.HeightMm:0.###} мм. " +
+                   "Выбор DXF LINE копирует координаты в отдельную модель предпросмотра, оригинал не изменяется. Пунктир DXF не является командой резки.",
             TextWrapping = TextWrapping.Wrap
         });
+        root.Children.Add(new TextBlock { Text = "Источник линии", FontWeight = FontWeight.SemiBold });
+        root.Children.Add(_sourceLine);
         root.Children.Add(_kind);
         root.Children.Add(fields);
         root.Children.Add(preview);
@@ -152,7 +183,7 @@ public sealed class SheetOperationsWindow : Window
             cut = skip = 0;
         var result = SheetOperationPlanner.InspectOpenLine(
             new(kind, new(sx, sy), new(ex, ey), a, b, cut, skip),
-            new Sheet(200, 100));
+            _sheet);
         _drawing.Children.Clear();
         var sheet = new Rectangle
         {
@@ -170,14 +201,15 @@ public sealed class SheetOperationsWindow : Window
             _status.Text = "Предпросмотр отклонён: " + string.Join("; ", result.Issues);
             return;
         }
+        var drawScale = Math.Min(480 / _sheet.WidthMm, 240 / _sheet.HeightMm);
         foreach (var segment in result.Segments)
         {
             var line = new Line
             {
-                StartPoint = new Point(20 + segment.Start.X * 2.4,
-                                       255 - segment.Start.Y * 2.4),
-                EndPoint = new Point(20 + segment.End.X * 2.4,
-                                     255 - segment.End.Y * 2.4),
+                StartPoint = new Point(20 + segment.Start.X * drawScale,
+                                       255 - segment.Start.Y * drawScale),
+                EndPoint = new Point(20 + segment.End.X * drawScale,
+                                     255 - segment.End.Y * drawScale),
                 Stroke = segment.IsCut ? Brushes.IndianRed : Brushes.SteelBlue,
                 StrokeThickness = segment.IsCut ? 3 : 2
             };
