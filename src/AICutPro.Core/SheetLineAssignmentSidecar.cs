@@ -84,7 +84,8 @@ public static class SheetLineAssignmentSidecar
     public static void Restore(
         string json, IReadOnlyList<DxfLine> lines, Sheet sheet,
         SheetLineAssignmentRegister register,
-        SheetUShapeAssignmentRegister? uShapes = null)
+        SheetUShapeAssignmentRegister? uShapes = null,
+        SheetChainAssignmentRegister? chains = null)
     {
         ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(sheet);
