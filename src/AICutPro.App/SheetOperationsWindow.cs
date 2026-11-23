@@ -209,6 +209,9 @@ public sealed class SheetOperationsWindow : Window
                 $"Назначено линий: {_assignments.Count}.";
         };
         root.Children.Add(clear);
+        var inspectIntent = new Button { Content = "Проверить назначения открытых DXF LINE" };
+        inspectIntent.Click += (_, _) => InspectOpenIntent();
+        root.Children.Add(inspectIntent);
         var saveAnnotations = new Button { Content = "Сохранить назначения отдельно (.json)" };
         saveAnnotations.Click += async (_, _) => await SaveAnnotationsAsync();
         root.Children.Add(saveAnnotations);
@@ -280,6 +283,24 @@ public sealed class SheetOperationsWindow : Window
         _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
             $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
             $"X {line.End.X:0.###}, Y {line.End.Y:0.###}. " + _status.Text;
+    }
+
+    private void InspectOpenIntent()
+    {
+        if (_dxfLines.Count == 0)
+        {
+            _status.Text = "Нет импортированных DXF LINE для диагностики.";
+            return;
+        }
+        var findings = OpenGeometryIntentReview.Inspect(
+            _dxfLines, _sheet, _assignments, _uAssignments);
+        var accepted = findings.Count(x => x.Status == OpenLineIntentStatus.AssignedPreview);
+        var unresolved = findings.Count(x => x.Status == OpenLineIntentStatus.NeedsReview);
+        var invalid = findings.Count(x => x.Status == OpenLineIntentStatus.InvalidAssignment);
+        _status.Text = $"Проверка GEO-3001: явно назначено: {accepted}; " +
+            $"не назначено: {unresolved}; ошибочные назначения: {invalid}. " +
+            "Открытая линия не является автоматически дефектом, но назначение " +
+            "технологии не означает готовность CAM или допуск станка.";
     }
 
     private async Task SaveAnnotationsAsync()
