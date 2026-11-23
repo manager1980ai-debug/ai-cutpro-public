@@ -40,6 +40,12 @@
           <TextBox x:Name="ProjectPartQuantityBox" Text="10" Watermark="Количество"/>
           <Button Content="Применить параметры проекта" Click="ApplyProjectClicked"/>
           <Button Content="Создать новый проект" Click="NewProjectClicked"/>
+          <StackPanel x:Name="ProjectReplacePanel" IsVisible="False" Spacing="6">
+            <TextBlock Text="Открытый DXF может содержать несохранённые назначения. Создать новый проект без сохранения текущего?"
+                       TextWrapping="Wrap" Foreground="#E8F4FF"/>
+            <Button Content="Отменить смену проекта" Click="CancelNewProjectClicked"/>
+            <Button Content="Подтвердить новый проект без сохранения" Click="ConfirmNewProjectClicked"/>
+          </StackPanel>
           <Button Content="Открыть проект (.json)" Click="OpenProjectClicked"/>
           <Button Content="Сохранить проект (.json)" Click="SaveProjectClicked"/>
           <TextBlock Text="Проект сохраняет параметры деталей и листа. При активном DXF сохранение из этого блока не допускается до интеграции назначений и редактора." Foreground="#9CB3C9" TextWrapping="Wrap"/>
