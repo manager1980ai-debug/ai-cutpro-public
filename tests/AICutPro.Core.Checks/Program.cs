@@ -4488,4 +4488,28 @@ Assert(DxfOpenClosedContactReview.Inspect(
     closedSquareAndOpen, mixedOpenSheet).Count > 0,
     "Cross-layer open LINE intersects standalone closed LWPOLYLINE");
 
+// A1: editing the first part must never discard additional project parts.
+var editedProject = CutProject.CreateDefault() with
+{
+    Name = "Edited saved job",
+    Sheet = new Sheet(800, 500),
+    Material = "Stainless steel",
+    ThicknessMm = 2.5,
+    Parts = [
+        new Part("First changed bracket", 80, 50, 3),
+        new Part("Additional plate", 100, 70, 2)
+    ]
+};
+var editedRoundtrip = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(editedProject));
+Assert(editedRoundtrip == editedProject ||
+       (editedRoundtrip.Name == editedProject.Name &&
+        editedRoundtrip.Parts.Count == 2 &&
+        editedRoundtrip.Parts[0] == editedProject.Parts[0] &&
+        editedRoundtrip.Parts[1] == editedProject.Parts[1] &&
+        editedRoundtrip.Sheet == editedProject.Sheet &&
+        editedRoundtrip.Material == editedProject.Material &&
+        editedRoundtrip.ThicknessMm == editedProject.ThicknessMm),
+    "Project edit/JSON roundtrip preserves both first and additional parts");
+
 Console.WriteLine("AI CutPro core checks passed.");
