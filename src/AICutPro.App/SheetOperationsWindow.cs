@@ -580,6 +580,15 @@ public sealed class SheetOperationsWindow : Window
             _status.Text = "Выберите DXF LINE и корректные числовые параметры.";
             return;
         }
+        var component = DxfOpenLineChainBuilder.Build(
+            _dxfLines, annotation.SelectedLineIndex);
+        if (component.IsValid && component.SourceIndices.Any(i =>
+            _assignments.TryGet(i, out _) || _uAssignments.TryGet(i, out _)))
+        {
+            _status.Text = "Назначение цепочки отклонено: её линии уже имеют " +
+                "отдельные технологические операции. Снимите конфликтующие назначения.";
+            return;
+        }
         var result = _chainAssignments.Assign(annotation, _dxfLines, _sheet);
         _status.Text = result.IsValid
             ? $"Цепочка назначена. Сохранено цепочек: {_chainAssignments.Count}. Для записи на диск сохраните JSON."
