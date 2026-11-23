@@ -3651,4 +3651,50 @@ Assert(!SheetUShapedPreset.Inspect(
     SheetLineProcessingMode.PerforatedThroughCut, 0, 2).IsValid,
     "U-shaped base refuses invalid cut/skip settings");
 
+// B1.2-06: versioned U-shaped annotation groups are bound to imported DXF
+// geometry and survive the v2 sidecar round-trip without becoming machine CAM.
+var uAnchorLines = new DxfLine[]
+{
+    new("U_BASE", new Point2(30, 20), new Point2(100, 20)),
+    new("OTHER", new Point2(20, 80), new Point2(100, 80))
+};
+var uAnnotations = new SheetUShapeAssignmentRegister();
+var uAssigned = new SheetUShapeAnnotation(
+    0, 35, SheetLineProcessingMode.PerforatedThroughCut, 3, 2);
+Assert(uAnnotations.Assign(uAssigned, uAnchorLines, uSheet).IsValid &&
+    !uAnnotations.CanGenerateMachineCommands && uAnnotations.Count == 1,
+    "U-shape group assigned to specific horizontal imported LINE");
+var uSidecar = SheetLineAssignmentSidecar.Export(
+    uAnchorLines, uSheet, new SheetLineAssignmentRegister(), uAnnotations);
+var uRestored = new SheetUShapeAssignmentRegister();
+var uRestoredLines = new SheetLineAssignmentRegister();
+SheetLineAssignmentSidecar.Restore(
+    uSidecar, uAnchorLines, uSheet, uRestoredLines, uRestored);
+Assert(uRestored.Count == 1 && uRestored.TryGet(0, out var uSaved) &&
+    uSaved == uAssigned && uRestoredLines.Count == 0,
+    "U-shape persisted and restored alongside line assignments");
+bool URejects(string text, IReadOnlyList<DxfLine> source)
+{
+    try
+    {
+        SheetLineAssignmentSidecar.Restore(
+            text, source, uSheet, uRestoredLines, uRestored);
+        return false;
+    }
+    catch (FormatException) { return true; }
+}
+Assert(URejects(uSidecar, [
+    new DxfLine("CHANGED", uAnchorLines[0].Start, uAnchorLines[0].End),
+    uAnchorLines[1]]), "U-shape sidecar rejects edited base layer");
+Assert(URejects(uSidecar.Replace("\"HeightMm\":35", "\"HeightMm\":500"),
+    uAnchorLines), "U-shape sidecar rejects group outside sheet");
+Assert(uRestored.TryGet(0, out uSaved) && uSaved == uAssigned,
+    "Invalid U-shape restore preserves prior annotations");
+Assert(!uRestored.Assign(uAssigned with { HeightMm = 200 },
+    uAnchorLines, uSheet).IsValid &&
+    uRestored.TryGet(0, out uSaved) && uSaved == uAssigned,
+    "Invalid U-shape edit never overwrites accepted group");
+Assert(uRestored.Remove(0) && uRestored.Count == 0,
+    "U-shape group can be independently removed");
+
 Console.WriteLine("AI CutPro core checks passed.");
