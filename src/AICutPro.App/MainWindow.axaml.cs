@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private WorkspaceGeometry _workspace = WorkspaceGeometry.Default;
     private VirtualMachine _virtualMachine = VirtualMachine.Create(WorkspaceGeometry.Default);
     private DxfImportResult? _dxfPreview;
+    private SheetOperationsWindow? _activeOperationsEditor;
     private DxfPreviewHistory? _dxfHistory;
     private IReadOnlyList<DxfDiagnosticFinding> _dxfDiagnostics = [];
     private int? _selectedPlacement;
@@ -67,9 +68,6 @@ public partial class MainWindow : Window
                         throw new FormatException("Project file size is invalid.");
                     var candidate = CutProjectSerializer.Deserialize(
                         File.ReadAllText(file.FullName));
-                    if (candidate.DxfWorkspace is not null)
-                        throw new FormatException(
-                            "Embedded DXF projects are not yet supported in the main GUI.");
                     _selectedProjectPart = 0;
                     AdoptProject(candidate);
                     StatusText.Text = $"Проект «{candidate.Name}» открыт: " +
@@ -426,10 +424,47 @@ public partial class MainWindow : Window
 
     private void ShowSheetOperationsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        new SheetOperationsWindow(_dxfPreview, _workspace.MaterialSheet, _selectedDxfLine).Show();
-        StatusText.Text = _dxfPreview is null
-            ? "Открыт демонстрационный предпросмотр технологических линий. Резка и CAM не разрешены."
-            : "Открыт предпросмотр технологических линий импортированного DXF. Исходник не изменяется; резка запрещена.";
+        if (_activeOperationsEditor is { IsVisible: true })
+        {
+            _activeOperationsEditor.Activate();
+            StatusText.Text = "Редактор технологических операций уже открыт.";
+            return;
+        }
+        try
+        {
+            var editor = new SheetOperationsWindow(
+                _dxfPreview, _workspace.MaterialSheet, _selectedDxfLine,
+                _project.DxfWorkspace);
+            _activeOperationsEditor = editor;
+            editor.Closed += (_, _) =>
+            {
+                if (_project.DxfWorkspace is { } embedded)
+                {
+                    try
+                    {
+                        var snapshot = editor.ExportEmbeddedWorkspace(embedded.SourceAsciiDxf);
+                        // Fail closed: the project is changed only on successful
+                        // exact-geometry validation of all technology registers.
+                        _project = _project with { DxfWorkspace = snapshot };
+                        StatusText.Text = "Назначения DXF сохранены в текущем проекте (в памяти). Запишите JSON.";
+                    }
+                    catch (Exception ex) when (ex is FormatException or ArgumentException)
+                    {
+                        StatusText.Text = "Не удалось принять назначения DXF: " + ex.Message;
+                    }
+                }
+                if (ReferenceEquals(_activeOperationsEditor, editor))
+                    _activeOperationsEditor = null;
+            };
+            editor.Show();
+            StatusText.Text = _project.DxfWorkspace is not null
+                ? "DXF и технологические назначения загружены из проекта. Управление станком запрещено."
+                : "Открыт предпросмотр технологических линий. CAM и резка запрещены.";
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
+        {
+            StatusText.Text = "Редактор DXF не открыт: " + ex.Message;
+        }
     }
 
     private void ShowDxfDiagnosticsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -2061,6 +2096,9 @@ public partial class MainWindow : Window
         if (workspace.Validate().Count > 0)
             throw new FormatException("Размер листа не помещается в виртуальном столе.");
         var preview = ShelfNester.Arrange(candidate.Sheet, candidate.Parts);
+        // Parse and validate the embedded project BEFORE mutating any UI state.
+        var restoredDxf = candidate.DxfWorkspace is null ? null :
+            CutProjectDxfWorkspaceCodec.Load(candidate.DxfWorkspace, candidate.Sheet).Document;
         _project = candidate;
         _workspace = workspace;
         _virtualMachine = VirtualMachine.Create(workspace);
@@ -2068,8 +2106,8 @@ public partial class MainWindow : Window
         _step = 0;
         _selectedPlacement = null;
         _selectedDxfLine = null;
-        _dxfPreview = null;
-        _dxfHistory = null;
+        _dxfPreview = restoredDxf;
+        _dxfHistory = restoredDxf is null ? null : new DxfPreviewHistory(restoredDxf);
         _dxfDiagnostics = [];
         ShowProjectFields(candidate);
         TableWidthBox.Text = workspace.Table.WidthMm.ToString("R", CultureInfo.InvariantCulture);
@@ -2083,11 +2121,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (_dxfPreview is not null)
-                throw new FormatException("Закройте DXF перед изменением данных проекта: нельзя терять аннотации чертежа.");
+            if (_dxfPreview is not null || _activeOperationsEditor is { IsVisible: true })
+                throw new FormatException("Закройте DXF и редактор назначений перед изменением структуры проекта.");
             var candidate = ReadProjectFields();
             if (candidate.DxfWorkspace is not null)
-                throw new FormatException("Редактирование проекта со встроенным DXF через этот упрощённый блок пока недоступно.");
+                throw new FormatException("Изменение структуры DXF-проекта пока недоступно.");
             AdoptProject(candidate);
             StatusText.Text = "Параметры проекта применены. Сохраните JSON для постоянного хранения.";
         }
@@ -2117,11 +2155,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (_dxfPreview is not null)
-                throw new FormatException("Активный DXF и его назначения ещё не подключены к основному редактору проекта. Сохранение остановлено, чтобы не потерять данные.");
+            if (_activeOperationsEditor is { IsVisible: true })
+                throw new FormatException("Закройте редактор технологических назначений перед сохранением проекта.");
+            if (_dxfPreview is not null && _project.DxfWorkspace is null)
+                throw new FormatException("Импортированный DXF ещё не включён в проект. Сохранение остановлено во избежание потери чертежа.");
             var candidate = ReadProjectFields();
-            if (candidate.DxfWorkspace is not null)
-                throw new FormatException("Повторное сохранение проекта со встроенным DXF в этом интерфейсе пока не реализовано.");
             var json = CutProjectSerializer.Serialize(candidate);
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
@@ -2138,7 +2176,9 @@ public partial class MainWindow : Window
             await writer.WriteAsync(json);
             await writer.FlushAsync();
             _project = candidate;
-            StatusText.Text = "Проект сохранён в JSON. DXF и команды станка не включены.";
+            StatusText.Text = candidate.DxfWorkspace is null
+                ? "Проект сохранён в JSON без DXF. Команд станку нет."
+                : "Проект, исходный DXF и назначения сохранены в одном JSON. Команд станку нет.";
         }
         catch (Exception ex) when (ex is FormatException or ArgumentException or IOException
                                    or UnauthorizedAccessException or NotSupportedException)
@@ -2151,8 +2191,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (_dxfPreview is not null)
-                throw new FormatException("Закройте активный DXF перед открытием проекта, чтобы не потерять чертёж.");
+            if (_dxfPreview is not null || _activeOperationsEditor is { IsVisible: true })
+                throw new FormatException("Закройте текущий DXF и редактор назначений перед открытием другого проекта.");
             var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
                 Title = "Открыть рабочий проект AI CutPro",
@@ -2175,8 +2215,6 @@ public partial class MainWindow : Window
             }
             if (read > 20_000_000) throw new FormatException("Файл проекта слишком большой.");
             var loaded = CutProjectSerializer.Deserialize(new string(buffer, 0, read));
-            if (loaded.DxfWorkspace is not null)
-                throw new FormatException("Проект содержит DXF. Ядро поддерживает его проверку, но основной редактор пока не восстанавливает такой чертёж. Текущий проект не изменён.");
             _selectedProjectPart = 0;
             AdoptProject(loaded);
             StatusText.Text = $"Проект «{loaded.Name}» открыт: {loaded.Parts.Count} деталей, лист {loaded.Sheet.WidthMm:0.###} × {loaded.Sheet.HeightMm:0.###} мм.";
