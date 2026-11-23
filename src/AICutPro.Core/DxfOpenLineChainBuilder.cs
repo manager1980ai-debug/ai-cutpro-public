@@ -18,7 +18,8 @@ public sealed record DxfOpenLineChain(
 public static class DxfOpenLineChainBuilder
 {
     public static DxfOpenLineChain Build(
-        IReadOnlyList<DxfLine> lines, int selectedIndex)
+        IReadOnlyList<DxfLine> lines, int selectedIndex,
+        bool reverseDirection = false)
     {
         ArgumentNullException.ThrowIfNull(lines);
         DxfOpenLineChain Fail(string issue) => new(false, [], [], [issue]);
@@ -92,6 +93,11 @@ public static class DxfOpenLineChainBuilder
         }
         if (current != endpoints[1] || ordered.Count != component.Count)
             return Fail("DXF chain is not a single open path.");
+        if (reverseDirection)
+        {
+            ordered.Reverse();
+            vertices.Reverse();
+        }
         return new(true, ordered, vertices, []);
     }
 
