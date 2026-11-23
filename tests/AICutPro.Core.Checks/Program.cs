@@ -4344,4 +4344,41 @@ catch (FormatException) { rejectedBundledCollision = true; }
 Assert(rejectedBundledCollision,
     "Project cannot embed conflicting legacy LINE and mixed curve assignments");
 
+// The project is reopened through the same public entrypoint users will use.
+var serializedBundledProject = CutProjectSerializer.Serialize(projectWithDxf);
+var reloadedBundledJson = CutProjectSerializer.Deserialize(serializedBundledProject);
+Assert(reloadedBundledJson.DxfWorkspace?.SourceAsciiDxf == bundledAsciiDxf,
+    "Full project reopening preserves the exact original ASCII DXF text");
+bool RefuseBundledFile(CutProject damaged)
+{
+    try
+    {
+        CutProjectSerializer.Deserialize(
+            System.Text.Json.JsonSerializer.Serialize(damaged));
+        return false;
+    }
+    catch (FormatException) { return true; }
+}
+Assert(RefuseBundledFile(projectWithDxf with
+{
+    DxfWorkspace = bundle with {
+        MixedAnnotationsJson = bundle.MixedAnnotationsJson.Replace(
+            "\"SelectedShapeIndex\":1", "\"SelectedShapeIndex\":999")
+    }
+}), "Project restore refuses tampered mixed annotation index");
+Assert(RefuseBundledFile(projectWithDxf with
+{
+    DxfWorkspace = bundle with {
+        LineAnnotationsJson = bundle.LineAnnotationsJson.Replace(
+            "\"Version\":3", "\"Version\":100")
+    }
+}), "Project restore refuses unsupported legacy sidecar version");
+Assert(RefuseBundledFile(projectWithDxf with
+{
+    DxfWorkspace = bundle with {
+        SourceAsciiDxf = bundledAsciiDxf.Replace(
+            "$INSUNITS\n70\n4", "$INSUNITS\n70\n1")
+    }
+}), "Project restore refuses wrong DXF units even for a valid JSON object");
+
 Console.WriteLine("AI CutPro core checks passed.");
