@@ -684,6 +684,15 @@ def probe_embedded_project_file(executable):
             time.sleep(0.3)
         else:
             raise RuntimeError("Embedded DXF project was not reopened: " + repr(labels[-12:]))
+        replacement_actions = [b for b in window.descendants(control_type="Button")
+                               if b.window_text() ==
+                               "Заменить DXF проекта (сброс назначений)"]
+        if len(replacement_actions) != 1 or not replacement_actions[0].is_visible():
+            raise RuntimeError(
+                "Embedded DXF source replacement must be visibly available "
+                "with an explicit reset-assignments label")
+        print("GUI DXF replacement entry PASS: explicit reset action visible; "
+              "native picker and confirmation still NOT VERIFIED on hosted runner")
         buttons = [b for b in window.descendants(control_type="Button")
                    if b.window_text() == "Технологические линии (предпросмотр)"]
         if len(buttons) != 1:
