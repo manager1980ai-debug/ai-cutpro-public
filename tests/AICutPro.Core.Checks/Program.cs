@@ -4187,4 +4187,57 @@ Assert(!crossingMixedResult.IsValid &&
             StringComparison.OrdinalIgnoreCase)),
     "The imported mixed DXF assembler enforces analytic crossings before drawing");
 
+// Stage 2: exact-identity mixed LINE+ARC annotations survive JSON round-trip.
+var savedMixed = new SheetMixedChainAssignmentRegister();
+var mixedAnnotation = new SheetMixedChainAnnotation(
+    1, SheetOperationKind.BendReference,
+    SheetLineProcessingMode.SurfaceScore);
+Assert(savedMixed.Assign(mixedAnnotation, mixedOpenShapes, mixedOpenSheet).IsValid
+    && savedMixed.Count == 1 && !savedMixed.CanGenerateMachineCommands,
+    "Mixed analytic chain supports explicit preview-only technology assignment");
+var mixedJson = SheetMixedChainSidecar.Export(
+    mixedOpenShapes, mixedOpenSheet, savedMixed);
+var reloadedMixed = new SheetMixedChainAssignmentRegister();
+SheetMixedChainSidecar.Restore(
+    mixedJson, mixedOpenShapes, mixedOpenSheet, reloadedMixed);
+Assert(reloadedMixed.TryGet(1, out var restoredMixed) &&
+    restoredMixed == mixedAnnotation,
+    "Mixed LINE+ARC technology is restored with exact DXF shape identity");
+bool RejectMixed(string source, IReadOnlyList<DxfShape> shapeList)
+{
+    try
+    {
+        SheetMixedChainSidecar.Restore(
+            source, shapeList, mixedOpenSheet, reloadedMixed);
+        return false;
+    }
+    catch (FormatException) { return true; }
+}
+Assert(RejectMixed(mixedJson,
+    [mixedOpenShapes[0],
+     new DxfArc("MIXED", new Point2(60, 60), 20.001, 270, 0),
+     mixedOpenShapes[2], mixedOpenShapes[3]]),
+    "Mixed chain refuses modified ARC radius, even by 0.001 mm");
+Assert(RejectMixed(mixedJson,
+    [mixedOpenShapes[1], mixedOpenShapes[0],
+     mixedOpenShapes[2], mixedOpenShapes[3]]),
+    "Mixed chain refuses DXF entity reorder rather than shifting annotation");
+Assert(RejectMixed(mixedJson.Replace("\"Version\":1", "\"Version\":999"),
+    mixedOpenShapes), "Unknown mixed-chain schema version must fail");
+Assert(RejectMixed(mixedJson.Replace(
+    "\"" + "SelectedShapeIndex" + "\":1",
+    "\"" + "SelectedShapeIndex" + "\":99"), mixedOpenShapes),
+    "Invalid source shape index fails atomically");
+Assert(reloadedMixed.TryGet(1, out restoredMixed) &&
+    restoredMixed == mixedAnnotation,
+    "Failed mixed sidecar restores must not erase previous accepted annotations");
+Assert(!savedMixed.Assign(mixedAnnotation with {
+    SelectedShapeIndex = 0
+}, mixedOpenShapes, mixedOpenSheet).IsValid && savedMixed.Count == 1,
+    "Two annotations cannot cover the same connected LINE+ARC component");
+Assert(!savedMixed.Assign(mixedAnnotation with {
+    Processing = SheetLineProcessingMode.AutoLegacy
+}, mixedOpenShapes, mixedOpenSheet).IsValid,
+    "Mixed chain rejects legacy inferred processing mode");
+
 Console.WriteLine("AI CutPro core checks passed.");
