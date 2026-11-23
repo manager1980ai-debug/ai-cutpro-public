@@ -3809,4 +3809,36 @@ Assert(!SheetOpenChainPlanner.Inspect(
     SheetLineProcessingMode.ThroughCut, 100, 1).IsValid,
     "Chain refuses insets that erase entire path");
 
+// B1.2-03: exact connectivity, deterministic path ordering, safe ambiguity refusal.
+var connectedLines = new DxfLine[]
+{
+    new("SLOT", new Point2(60, 20), new Point2(60, 70)),
+    new("SLOT", new Point2(10, 20), new Point2(60, 20)),
+    new("OTHER", new Point2(60, 20), new Point2(100, 20))
+};
+var builtChain = DxfOpenLineChainBuilder.Build(connectedLines, 0);
+Assert(builtChain.IsValid && builtChain.SourceIndices.SequenceEqual([1, 0])
+    && builtChain.Vertices.SequenceEqual(rightAngleChain)
+    && !builtChain.CanGenerateMachineCommands,
+    "Selected LINE collects only exact connected same-layer path in stable order");
+var chainFromImport = SheetOpenChainPlanner.Inspect(
+    builtChain.Vertices, chainSheet, SheetOperationKind.PerforatedCut,
+    SheetLineProcessingMode.PerforatedThroughCut, 5, 5, 3, 2);
+Assert(chainFromImport.IsValid && chainFromImport.Segments.Any(s => !s.IsCut),
+    "Imported DXF LINE chain can form continuous Cut/Skip preview");
+Assert(!DxfOpenLineChainBuilder.Build(
+    [connectedLines[0], connectedLines[1],
+     new DxfLine("SLOT", new Point2(60, 20), new Point2(80, 20))],
+    0).IsValid, "Three-way branch must never be auto-joined");
+Assert(!DxfOpenLineChainBuilder.Build(
+    [connectedLines[0], connectedLines[0]], 0).IsValid,
+    "Duplicate DXF lines must not create an ambiguous chain");
+Assert(!DxfOpenLineChainBuilder.Build(
+    [new DxfLine("SLOT", new Point2(0, 0), new Point2(10, 0)),
+     new DxfLine("SLOT", new Point2(10, 0), new Point2(0, 10)),
+     new DxfLine("SLOT", new Point2(0, 10), new Point2(0, 0))],
+    0).IsValid, "Closed contour is not an open technological chain");
+Assert(!DxfOpenLineChainBuilder.Build(connectedLines, -1).IsValid,
+    "Invalid DXF LINE index fails closed");
+
 Console.WriteLine("AI CutPro core checks passed.");
