@@ -4085,4 +4085,54 @@ Assert(importedCurves.InsUnits == 4 &&
         DxfOpenCurveInspector.Inspect(shape, curvedSheet).IsValid),
     "Real DXF ARC and bulged LWPOLYLINE import to separate safe curved previews");
 
+// B1: mixed open LINE/ARC topology retains exact arcs, never CAM commands.
+var mixedOpenSheet = new Sheet(200, 130);
+var mixedOpenShapes = new DxfShape[]
+{
+    new DxfLine("MIXED", new Point2(20, 40), new Point2(60, 40)),
+    new DxfArc("MIXED", new Point2(60, 60), 20, 270, 0),
+    new DxfLine("MIXED", new Point2(80, 60), new Point2(80, 110)),
+    new DxfLine("OTHER", new Point2(80, 60), new Point2(130, 60))
+};
+var mixedOpen = MixedOpenChainAssembler.Assemble(
+    mixedOpenShapes, 1, mixedOpenSheet);
+Assert(mixedOpen.IsValid && mixedOpen.SourceIndices.SequenceEqual([0, 1, 2])
+    && mixedOpen.AnalyticPath is { Closed: false }
+    && mixedOpen.AnalyticPath.Segments.Count == 3
+    && mixedOpen.AnalyticPath.Segments[1] is PreviewArc
+    && Math.Abs(mixedOpen.LengthMm - (90 + 10 * Math.PI)) < 1e-6
+    && !mixedOpen.CanGenerateMachineCommands,
+    "Open LINE ARC LINE connected by exact analytic endpoints, retaining ARC");
+var mixedBranch = mixedOpenShapes.Concat([
+    new DxfLine("MIXED", new Point2(80, 60), new Point2(110, 80))
+]).ToArray();
+Assert(!MixedOpenChainAssembler.Assemble(mixedBranch, 1, mixedOpenSheet).IsValid,
+    "Mixed open graph rejects three-way branch at ARC endpoint");
+Assert(!MixedOpenChainAssembler.Assemble(
+    [new DxfLine("MIXED", new Point2(20, 40), new Point2(60, 40)),
+     new DxfArc("MIXED", new Point2(60, 60), 20, 270, 0),
+     new DxfLine("MIXED", new Point2(80.1, 60), new Point2(80, 110))],
+    1, mixedOpenSheet).IsValid,
+    "Mixed chain refuses a visible 0.1 mm gap instead of snapping");
+Assert(!MixedOpenChainAssembler.Assemble(
+    [new DxfArc("MIXED", new Point2(60, 60), 20, 0, 360)],
+    0, mixedOpenSheet).IsValid,
+    "Mixed open chain refuses ambiguous full-circle ARC");
+var mixedBulgeShapes = new DxfShape[]
+{
+    new DxfLine("CURVED", new Point2(5, 20), new Point2(20, 20)),
+    new DxfBulgedPolyline("CURVED",
+        [new Point2(20, 20), new Point2(60, 20)],
+        [1d, 0d], false),
+    new DxfLine("CURVED", new Point2(60, 20), new Point2(70, 20))
+};
+var mixedBulgePreview = MixedOpenChainAssembler.Assemble(
+    mixedBulgeShapes, 1, mixedOpenSheet);
+Assert(mixedBulgePreview.IsValid &&
+    mixedBulgePreview.AnalyticPath is { Closed: false } &&
+    mixedBulgePreview.AnalyticPath.Segments.Count == 3 &&
+    mixedBulgePreview.AnalyticPath.Segments[1] is PreviewArc &&
+    Math.Abs(mixedBulgePreview.LengthMm - (25 + 20 * Math.PI)) < 1e-6,
+    "Bulged open POLYLINE joins LINE segments while preserving analytic arc");
+
 Console.WriteLine("AI CutPro core checks passed.");
