@@ -422,6 +422,21 @@ public sealed class SheetOperationsWindow : Window
             "технологии не означает готовность CAM или допуск станка.";
     }
 
+    private void RequireNoCrossAssignments(
+        SheetLineAssignmentRegister? lineRegister = null,
+        SheetUShapeAssignmentRegister? uRegister = null,
+        SheetChainAssignmentRegister? chainRegister = null,
+        SheetMixedChainAssignmentRegister? mixedRegister = null)
+    {
+        var issues = SheetTechnologyOverlapReview.Inspect(
+            _allDxfShapes, _sheet, lineRegister ?? _assignments,
+            uRegister ?? _uAssignments, chainRegister ?? _chainAssignments,
+            mixedRegister ?? _mixedAssignments);
+        if (issues.Count > 0)
+            throw new FormatException("Конфликт назначений DXF: " +
+                string.Join("; ", issues.Take(4)));
+    }
+
     private async Task SaveAnnotationsAsync()
     {
         try
@@ -431,6 +446,7 @@ public sealed class SheetOperationsWindow : Window
                 _status.Text = "Сначала импортируйте DXF с объектами LINE.";
                 return;
             }
+            RequireNoCrossAssignments();
             var json = SheetLineAssignmentSidecar.Export(
                 _dxfLines, _sheet, _assignments, _uAssignments, _chainAssignments);
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -491,9 +507,16 @@ public sealed class SheetOperationsWindow : Window
             }
             if (length > 8_000_000)
                 throw new FormatException("Файл назначений слишком большой.");
+            var stagedLine = new SheetLineAssignmentRegister();
+            var stagedU = new SheetUShapeAssignmentRegister();
+            var stagedChain = new SheetChainAssignmentRegister();
             SheetLineAssignmentSidecar.Restore(
                 new string(buffer, 0, length), _dxfLines, _sheet,
-                _assignments, _uAssignments, _chainAssignments);
+                stagedLine, stagedU, stagedChain);
+            RequireNoCrossAssignments(stagedLine, stagedU, stagedChain);
+            _assignments.ReplaceValidated(stagedLine.Snapshot());
+            _uAssignments.ReplaceValidated(stagedU.Snapshot());
+            _chainAssignments.ReplaceValidated(stagedChain.Snapshot());
             if (_sourceLine.SelectedIndex > 0)
                 ApplySelectedLine();
             _status.Text = $"Восстановлено назначений: {_assignments.Count}; П-образных групп: {_uAssignments.Count}; цепочек: {_chainAssignments.Count}. " +
@@ -768,6 +791,7 @@ public sealed class SheetOperationsWindow : Window
     {
         try
         {
+            RequireNoCrossAssignments();
             var json = SheetMixedChainSidecar.Export(
                 _allDxfShapes, _sheet, _mixedAssignments);
             var file = await StorageProvider.SaveFilePickerAsync(
@@ -827,9 +851,12 @@ public sealed class SheetOperationsWindow : Window
             }
             if (length > 8_000_000)
                 throw new FormatException("Файл смешанных назначений слишком большой.");
+            var stagedMixed = new SheetMixedChainAssignmentRegister();
             SheetMixedChainSidecar.Restore(
                 new string(buffer, 0, length), _allDxfShapes,
-                _sheet, _mixedAssignments);
+                _sheet, stagedMixed);
+            RequireNoCrossAssignments(mixedRegister: stagedMixed);
+            _mixedAssignments.ReplaceValidated(stagedMixed.Snapshot());
             _status.Text = $"Восстановлено смешанных цепочек: {_mixedAssignments.Count}. " +
                 "Только предпросмотр, без команд станку.";
         }
