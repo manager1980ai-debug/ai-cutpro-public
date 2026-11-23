@@ -141,6 +141,20 @@ public static class MixedOpenChainAssembler
                 foreach (var neighbor in incident[node])
                     if (!visited.Contains(neighbor)) pending.Push(neighbor);
         }
+        // An unconnected entity with a near-miss endpoint (e.g. a 0.1 mm
+        // gap) is not treated as a harmless separate component. Require the
+        // drawing author to repair or explicitly separate it first.
+        const double NearMissMm = 0.2;
+        foreach (var member in visited)
+        foreach (var outsider in Enumerable.Range(0, edges.Count)
+            .Where(index => !visited.Contains(index)))
+        {
+            if (new[] { edges[member].Start, edges[member].End }.Any(p =>
+                new[] { edges[outsider].Start, edges[outsider].End }.Any(q =>
+                    Distance(p, q) > joinToleranceMm &&
+                    Distance(p, q) <= NearMissMm)))
+                return Fail("Near-miss mixed entity endpoints require explicit CAD repair.");
+        }
         var degrees = new Dictionary<int, int>();
         foreach (var edge in visited)
         {
