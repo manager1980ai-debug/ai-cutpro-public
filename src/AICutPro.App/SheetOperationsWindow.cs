@@ -215,6 +215,21 @@ public sealed class SheetOperationsWindow : Window
             FontWeight = FontWeight.SemiBold
         });
         root.Children.Add(_sourceCurve);
+        var pickFirstCurve = new Button
+        {
+            Content = "Выбрать первую импортированную DXF-кривую"
+        };
+        pickFirstCurve.Click += (_, _) =>
+        {
+            if (_curves.Count == 0)
+            {
+                _status.Text = "В DXF нет открытых ARC или POLYLINE.";
+                return;
+            }
+            _sourceCurve.SelectedIndex = 1;
+            RenderOpenCurve();
+        };
+        root.Children.Add(pickFirstCurve);
         var curvePreview = new Button
         {
             Content = "Предпросмотр открытой DXF-дуги/полилинии"
