@@ -258,10 +258,10 @@ public partial class MainWindow : Window
             var lines = _dxfPreview.Shapes.OfType<DxfLine>().ToArray();
             // Screen coordinates use the current zoom/pan and DXF Y direction.
             // Selection is conservative: no click near a line means no hit.
-            var pt = current.Position;
+            var canvasPoint = current.Position;
             if (!double.IsFinite(_viewScale) || _viewScale <= 0) return;
-            var modelX = (pt.X - _viewOx) / _viewScale;
-            var modelY = (pt.Y - _viewOy) / (_viewInvertsY ? -_viewScale : _viewScale);
+            var modelX = (canvasPoint.X - _viewOx) / _viewScale;
+            var modelY = (canvasPoint.Y - _viewOy) / (_viewInvertsY ? -_viewScale : _viewScale);
             _selectedDxfLine = DxfLinePicker.Pick(
                 lines, new Point2(modelX, modelY), 7.0 / _viewScale,
                 ambiguityToleranceMm: 1.0 / _viewScale);
