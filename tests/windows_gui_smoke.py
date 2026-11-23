@@ -245,7 +245,10 @@ def probe_selected_dxf_line(executable):
         "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nCUT_SAMPLE\n"
         "10\n15\n20\n35\n11\n180\n21\n35\n"
         "0\nLINE\n8\nCUT_SAMPLE\n10\n180\n20\n35\n11\n180\n21\n75\n"
-        "0\nENDSEC\n0\nEOF\n",
+        "0\\nARC\\n8\\nCURVES\\n10\\n60\\n20\\n50\\n40\\n20\\n50\\n0\\n51\\n90\\n"
+        "0\\nLWPOLYLINE\\n8\\nCURVES\\n90\\n2\\n70\\n0\\n"
+        "10\\n20\\n20\\n20\\n42\\n1\\n10\\n60\\n20\\n20\\n"
+        "0\\nENDSEC\\n0\\nEOF\\n",
         encoding="ascii")
     launched = subprocess.Popen([str(executable), "--open-dxf", str(path)],
                                 cwd=executable.parent)
@@ -423,8 +426,27 @@ def probe_selected_dxf_line(executable):
             time.sleep(0.2)
         else:
             raise RuntimeError("GEO-3001 did not report unresolved imported LINE")
+        curve_buttons = [b for b in operation_window.descendants(control_type="Button")
+                         if b.window_text() == "Предпросмотр открытой DXF-дуги/полилинии"]
+        if len(curve_buttons) != 1:
+            raise RuntimeError("ARC/POLYLINE independent preview action missing")
+        all_combos = operation_window.descendants(control_type="ComboBox")
+        if len(all_combos) < 7:
+            raise RuntimeError("Open-curve DXF selector absent")
+        # The open-curve selector is inserted after the processing/chain selectors.
+        all_combos[-1].select(1)
+        curve_buttons[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Предпросмотр кривой: DxfArc" in value and
+                   "аналитическая длина" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Imported ARC was not rendered in DXF curve preview")
         operation_window.close()
-        print("GUI DXF LINE selection PASS: endpoints, presets, operations and GEO-3001 review verified")
+        print("GUI DXF LINE/ARC selection PASS: connected LINE and curved ARC previews verified")
     finally:
         launched.terminate()
         try:
