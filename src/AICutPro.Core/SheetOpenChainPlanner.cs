@@ -52,7 +52,9 @@ public static class SheetOpenChainPlanner
                 issues.Add("Open-chain vertex lies outside sheet or is invalid.");
             if (i == 0) continue;
             var prev = vertices[i - 1];
-            var length = Math.Hypot(p.X - prev.X, p.Y - prev.Y);
+            var dx = p.X - prev.X;
+            var dy = p.Y - prev.Y;
+            var length = Math.Sqrt(dx * dx + dy * dy);
             if (!double.IsFinite(length) || length <= 1e-9)
                 issues.Add("Open chain has a degenerate segment.");
             lengths[i - 1] = length;
