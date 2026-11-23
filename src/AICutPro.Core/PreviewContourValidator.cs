@@ -147,6 +147,73 @@ public static class PreviewContourValidator
     }
 
     /// <summary>
+    /// Analytic checks for ONE ordered OPEN preview path. This uses exact
+    /// line/line, line/circle and circle/circle intersections, restricted to
+    /// the original arc sweeps. It never closes an open contour or grants CAM
+    /// or machine authorization. Only the shared adjacent endpoint may touch.
+    /// </summary>
+    public static IReadOnlyList<string> ValidateOpen(
+        PreviewPath path, double joinToleranceMm = 0.001,
+        double intersectionToleranceMm = DefaultIntersectionToleranceMm)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (!double.IsFinite(joinToleranceMm) ||
+            joinToleranceMm < 1e-7 || joinToleranceMm > 0.01)
+            throw new ArgumentOutOfRangeException(nameof(joinToleranceMm));
+        if (!double.IsFinite(intersectionToleranceMm) ||
+            intersectionToleranceMm < 1e-9 || intersectionToleranceMm > 0.01)
+            throw new ArgumentOutOfRangeException(nameof(intersectionToleranceMm));
+        if (path.Closed || path.Segments is null ||
+            path.Segments.Count is < 1 or > 1000)
+            return ["Expected a bounded, ordered open LINE/ARC path."];
+        var segments = path.Segments;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            if (segments[i] is not (PreviewLine or PreviewArc))
+                return ["Unsupported open-path segment."];
+            if (segments[i] is PreviewArc arc &&
+                (!double.IsFinite(arc.RadiusMm) || arc.RadiusMm <= 0 ||
+                 !double.IsFinite(arc.StartDegrees) ||
+                 !double.IsFinite(arc.SweepDegrees) ||
+                 arc.SweepDegrees == 0 ||
+                 Math.Abs(arc.SweepDegrees) >= 360))
+                return [$"Invalid open-path ARC {i + 1}."];
+            var (a, b) = Ends(segments[i]);
+            if (!double.IsFinite(a.X) || !double.IsFinite(a.Y) ||
+                !double.IsFinite(b.X) || !double.IsFinite(b.Y) ||
+                Dist(a, b) <= intersectionToleranceMm)
+                return [$"Invalid open-path endpoints at {i + 1}."];
+            if (i > 0 &&
+                Dist(Ends(segments[i - 1]).End, a) > joinToleranceMm)
+                return [$"Open path has a gap at joint {i}."];
+        }
+        // Never mistake an open path that touches its first vertex at the
+        // end for an open technological line.
+        if (Dist(Ends(segments[0]).Start, Ends(segments[^1]).End)
+            <= joinToleranceMm)
+            return ["Open path closes at its own endpoints."];
+        for (var i = 0; i < segments.Count; i++)
+        for (var j = i + 1; j < segments.Count; j++)
+        {
+            var hits = Intersections(segments[i], segments[j],
+                intersectionToleranceMm);
+            if (hits is null)
+                return [$"Ambiguous overlapping or coincident open segments {i + 1}/{j + 1}."];
+            var adjacent = j == i + 1;
+            var joint = Ends(segments[i]).End;
+            foreach (var point in hits)
+            {
+                if (adjacent &&
+                    Dist(point, joint) <= joinToleranceMm &&
+                    Dist(point, Ends(segments[j]).Start) <= joinToleranceMm)
+                    continue;
+                return [$"Open segments {i + 1}/{j + 1} cross or touch outside their shared endpoint."];
+            }
+        }
+        return [];
+    }
+
+    /// <summary>
     /// Checks contacts between TWO distinct analytic preview rings. A touching or crossing
     /// boundary is an error even when each ring is individually simple. This does not
     /// determine nesting, hole ownership, or eligibility for CAM.
