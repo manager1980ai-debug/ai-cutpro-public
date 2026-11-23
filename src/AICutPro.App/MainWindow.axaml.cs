@@ -542,8 +542,12 @@ public partial class MainWindow : Window
 
             // Prepare and validate the replacement without changing the live
             // project. Every old technology assignment will be discarded.
+            var existing = CutProjectDxfWorkspaceCodec.Load(
+                _project.DxfWorkspace, _project.Sheet);
             var candidate = CutProjectDxfWorkspaceCodec.ReplaceSource(
                 _project, source, discardExistingAssignments: true);
+            var replacement = CutProjectDxfWorkspaceCodec.Load(
+                candidate.DxfWorkspace!, candidate.Sheet);
             var dialog = new Window
             {
                 Title = "AI CutPro | Замена DXF и сброс назначений",
@@ -555,7 +559,9 @@ public partial class MainWindow : Window
             var panel = new StackPanel { Spacing = 12, Margin = new Thickness(18) };
             panel.Children.Add(new TextBlock
             {
-                Text = "Исходная геометрия DXF изменится. ВСЕ прежние технологические " +
+                Text = $"Сейчас: {existing.Document.Shapes.Count} DXF-объектов. " +
+                       $"После замены: {replacement.Document.Shapes.Count} DXF-объектов. " +
+                       "Исходная геометрия DXF изменится. ВСЕ прежние технологические " +
                        "назначения LINE/U/цепочек и дуг будут удалены. " +
                        "Новый DXF уже проверен, но назначать операции придётся заново. " +
                        "Продолжить? Сначала сохраните резервную копию проекта, если она нужна.",
