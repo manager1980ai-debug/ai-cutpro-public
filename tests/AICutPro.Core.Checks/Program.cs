@@ -3948,4 +3948,33 @@ Assert(overlapReview[0].Status == OpenLineIntentStatus.InvalidAssignment
     && overlapReview[0].DiagnosticCode == "GEO-3099",
     "Diagnostic explicitly flags double treatment of one DXF LINE");
 
+// V3 export must reject contradictory technology on the same physical DXF LINE.
+var conflictingLineAssignments = new SheetLineAssignmentRegister();
+var collisionLine = new SheetLineOperation(
+    SheetOperationKind.OpenThroughCut,
+    chainImported[0].Start, chainImported[0].End,
+    Processing: SheetLineProcessingMode.ThroughCut);
+Assert(conflictingLineAssignments.Assign(
+    0, chainImported[0].Start, chainImported[0].End,
+    collisionLine, chainSheet).IsValid, "Independent LINE operation can be staged");
+bool rejectedOverlapExport = false;
+try
+{
+    SheetLineAssignmentSidecar.Export(
+        chainImported, chainSheet, conflictingLineAssignments,
+        new SheetUShapeAssignmentRegister(), chainRegistry);
+}
+catch (FormatException) { rejectedOverlapExport = true; }
+Assert(rejectedOverlapExport,
+    "V3 sidecar refuses a chain plus separate operation on its DXF member");
+var legacyUJson = uSidecar.Replace("\"Version\":3", "\"Version\":2");
+var restoredV2U = new SheetUShapeAssignmentRegister();
+SheetLineAssignmentSidecar.Restore(
+    legacyUJson, uAnchorLines, uSheet,
+    new SheetLineAssignmentRegister(), restoredV2U);
+Assert(restoredV2U.Count == 1 &&
+    restoredV2U.TryGet(0, out var restoredV2UAnnotation) &&
+    restoredV2UAnnotation == uAssigned,
+    "V2 sidecar with U-shaped operations remains readable under V3");
+
 Console.WriteLine("AI CutPro core checks passed.");
