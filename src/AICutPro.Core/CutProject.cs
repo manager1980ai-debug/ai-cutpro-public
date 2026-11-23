@@ -11,7 +11,8 @@ public sealed record CutProject(
     Sheet Sheet,
     List<Part> Parts,
     string Material,
-    double ThicknessMm)
+    double ThicknessMm,
+    CutProjectDxfWorkspace? DxfWorkspace = null)
 {
     public const int CurrentFormatVersion = 1;
 
@@ -37,6 +38,8 @@ public static class CutProjectSerializer
 
     public static CutProject Deserialize(string json)
     {
+        if (json is { Length: > 20_000_000 })
+            throw new FormatException("Файл проекта превышает допустимый размер.");
         if (string.IsNullOrWhiteSpace(json)) throw new FormatException("Файл проекта пуст.");
         CutProject? result;
         try { result = JsonSerializer.Deserialize<CutProject>(json, Options); }
@@ -65,6 +68,8 @@ public static class CutProjectSerializer
         if (string.IsNullOrWhiteSpace(project.Material) || project.Material.Length > 200 ||
             !Positive(project.ThicknessMm))
             throw new FormatException("Некорректные параметры материала.");
+        if (project.DxfWorkspace is not null)
+            CutProjectDxfWorkspaceCodec.Validate(project.DxfWorkspace, project.Sheet);
     }
 
     private static bool Positive(double value) => double.IsFinite(value) && value > 0;
