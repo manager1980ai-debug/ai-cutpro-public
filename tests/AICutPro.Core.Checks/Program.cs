@@ -3926,4 +3926,26 @@ var priorV2 = chainJson.Replace("\"Version\":3", "\"Version\":2");
 Assert(RejectChainRestore(priorV2, chainImported, chainRestored),
     "A legacy version cannot silently contain v3 chain technology");
 
+// Open-intent diagnostics recognise all members of an assigned chain,
+ // including ambiguous overlapping per-line operations.
+var chainReviewLines = new SheetLineAssignmentRegister();
+var chainReview = OpenGeometryIntentReview.Inspect(
+    chainImported, chainSheet, chainReviewLines, null, chainRegistry);
+Assert(chainReview[0].Status == OpenLineIntentStatus.AssignedPreview
+    && chainReview[1].Status == OpenLineIntentStatus.AssignedPreview
+    && chainReview[2].Status == OpenLineIntentStatus.NeedsReview,
+    "Diagnostics report both imported LINEs covered by one chain");
+var overlappingLine = new SheetLineOperation(
+    SheetOperationKind.OpenThroughCut,
+    chainImported[0].Start, chainImported[0].End,
+    Processing: SheetLineProcessingMode.ThroughCut);
+Assert(chainReviewLines.Assign(0, chainImported[0].Start,
+    chainImported[0].End, overlappingLine, chainSheet).IsValid,
+    "Independent legacy single-line registry can have an overlap");
+var overlapReview = OpenGeometryIntentReview.Inspect(
+    chainImported, chainSheet, chainReviewLines, null, chainRegistry);
+Assert(overlapReview[0].Status == OpenLineIntentStatus.InvalidAssignment
+    && overlapReview[0].DiagnosticCode == "GEO-3099",
+    "Diagnostic explicitly flags double treatment of one DXF LINE");
+
 Console.WriteLine("AI CutPro core checks passed.");
