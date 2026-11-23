@@ -332,6 +332,19 @@ def probe_selected_dxf_line(executable):
             raise RuntimeError(
                 "DXF selection did not populate coordinate text boxes: "
                 + repr(coordinate_values))
+        preset_buttons = [b for b in operation_window.descendants(control_type="Button")
+                          if b.window_text() == "Применить шаблон к выбранной линии"]
+        if len(preset_buttons) != 1:
+            raise RuntimeError("DXF LINE preset action not found")
+        preset_buttons[0].iface_invoke.Invoke()
+        for _ in range(15):
+            labels = [x.window_text() for x in
+                      operation_window.descendants(control_type="Text")]
+            if any("Шаблон подготовлен" in value for value in labels):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Open-cut preset did not update the editor preview")
         assign_buttons = [b for b in operation_window.descendants(control_type="Button")
                           if b.window_text() == "Назначить операцию выбранной DXF LINE (сеанс)"]
         if len(assign_buttons) != 1:
