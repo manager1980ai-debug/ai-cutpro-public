@@ -361,8 +361,10 @@ public partial class MainWindow : Window
 
     private void ShowSheetOperationsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        new SheetOperationsWindow().Show();
-        StatusText.Text = "Открыт предпросмотр технологических линий. Резка и CAM не разрешены.";
+        new SheetOperationsWindow(_dxfPreview, _workspace.MaterialSheet).Show();
+        StatusText.Text = _dxfPreview is null
+            ? "Открыт демонстрационный предпросмотр технологических линий. Резка и CAM не разрешены."
+            : "Открыт предпросмотр технологических линий импортированного DXF. Исходник не изменяется; резка запрещена.";
     }
 
     private void ShowDxfDiagnosticsClicked(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
