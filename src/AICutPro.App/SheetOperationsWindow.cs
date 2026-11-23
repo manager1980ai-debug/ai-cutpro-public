@@ -22,6 +22,7 @@ public sealed class SheetOperationsWindow : Window
     private readonly IReadOnlyList<DxfLine> _dxfLines;
     private readonly Sheet _sheet;
     private readonly SheetLineAssignmentRegister _assignments = new();
+    private readonly SheetUShapeAssignmentRegister _uAssignments = new();
     private readonly TextBox _startX, _startY, _endX, _endY;
     private readonly TextBox _startInset, _endInset, _cut, _skip, _uHeight;
     private readonly TextBlock _status;
@@ -176,6 +177,21 @@ public sealed class SheetOperationsWindow : Window
         var uPreview = new Button { Content = "Показать П-образную прорезь" };
         uPreview.Click += (_, _) => RenderUPreview();
         uOptions.Children.Add(uPreview);
+        var uAssign = new Button { Content = "Назначить П-образную прорезь (группа)" };
+        uAssign.Click += (_, _) => AssignUGroup();
+        uOptions.Children.Add(uAssign);
+        var uClear = new Button { Content = "Снять П-образную группу" };
+        uClear.Click += (_, _) =>
+        {
+            if (_sourceLine.SelectedIndex <= 0 ||
+                !_uAssignments.Remove(_sourceLine.SelectedIndex - 1))
+            {
+                _status.Text = "Нет П-образной группы для выбранной линии.";
+                return;
+            }
+            _status.Text = $"П-образная группа удалена. Осталось групп: {_uAssignments.Count}.";
+        };
+        uOptions.Children.Add(uClear);
         root.Children.Add(uOptions);
         var assign = new Button { Content = "Назначить операцию выбранной DXF LINE (сеанс)" };
         assign.Click += (_, _) => AssignCurrentLine();
@@ -253,6 +269,11 @@ public sealed class SheetOperationsWindow : Window
             _skip.Text = "2";
         }
         RenderPreview();
+        if (_uAssignments.TryGet(selected - 1, out var savedGroup) &&
+            savedGroup is not null)
+        {
+            _uHeight.Text = savedGroup.HeightMm.ToString("R", CultureInfo.InvariantCulture);
+        }
         _status.Text = $"Источник DXF LINE №{selected}, слой {line.Layer}: " +
             $"X {line.Start.X:0.###}, Y {line.Start.Y:0.###} → " +
             $"X {line.End.X:0.###}, Y {line.End.Y:0.###}. " + _status.Text;
@@ -267,7 +288,8 @@ public sealed class SheetOperationsWindow : Window
                 _status.Text = "Сначала импортируйте DXF с объектами LINE.";
                 return;
             }
-            var json = SheetLineAssignmentSidecar.Export(_dxfLines, _sheet, _assignments);
+            var json = SheetLineAssignmentSidecar.Export(
+                _dxfLines, _sheet, _assignments, _uAssignments);
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
                 Title = "Сохранить технологические назначения (не DXF)",
@@ -284,7 +306,7 @@ public sealed class SheetOperationsWindow : Window
             await using var writer = new StreamWriter(stream);
             await writer.WriteAsync(json);
             await writer.FlushAsync();
-            _status.Text = $"Сохранено назначений: {_assignments.Count}. Исходный DXF не изменён.";
+            _status.Text = $"Сохранено линий: {_assignments.Count}; П-образных групп: {_uAssignments.Count}. DXF не изменён.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                    or FormatException or NotSupportedException)
@@ -327,10 +349,11 @@ public sealed class SheetOperationsWindow : Window
             if (length > 8_000_000)
                 throw new FormatException("Файл назначений слишком большой.");
             SheetLineAssignmentSidecar.Restore(
-                new string(buffer, 0, length), _dxfLines, _sheet, _assignments);
+                new string(buffer, 0, length), _dxfLines, _sheet,
+                _assignments, _uAssignments);
             if (_sourceLine.SelectedIndex > 0)
                 ApplySelectedLine();
-            _status.Text = $"Восстановлено назначений: {_assignments.Count}. " +
+            _status.Text = $"Восстановлено назначений: {_assignments.Count}; П-образных групп: {_uAssignments.Count}. " +
                 "Исходный DXF не изменён; управление станком запрещено.";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -422,6 +445,25 @@ public sealed class SheetOperationsWindow : Window
             ? $"Операция {kind} назначена DXF LINE №{index + 1}. " +
               $"Назначено линий: {_assignments.Count}. Только текущий сеанс; файл DXF не изменён, резка запрещена."
             : "Назначение отклонено: " + string.Join("; ", result.Issues);
+    }
+
+    private void AssignUGroup()
+    {
+        if (_sourceLine.SelectedIndex <= 0 ||
+            _sourceLine.SelectedIndex > _dxfLines.Count ||
+            !Number(_uHeight, out var height) ||
+            !Number(_cut, out var cut) || !Number(_skip, out var skip))
+        {
+            _status.Text = "Для П-образной группы выберите DXF LINE и числовые параметры.";
+            return;
+        }
+        var annotation = new SheetUShapeAnnotation(
+            _sourceLine.SelectedIndex - 1, height, SelectedProcessing(),
+            cut, skip);
+        var result = _uAssignments.Assign(annotation, _dxfLines, _sheet);
+        _status.Text = result.IsValid
+            ? $"П-образная группа назначена. Групп: {_uAssignments.Count}. Сохраните JSON, чтобы восстановить её позже."
+            : "П-образная группа отклонена: " + string.Join("; ", result.Issues);
     }
 
     private void RenderUPreview()
