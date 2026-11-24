@@ -2376,7 +2376,6 @@ public partial class MainWindow : Window
             if (_dxfPreview is not null && _project.DxfWorkspace is null)
                 throw new FormatException("Импортированный DXF ещё не включён в проект. Сохранение остановлено во избежание потери чертежа.");
             var candidate = ReadProjectFields();
-            var json = CutProjectSerializer.Serialize(candidate);
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
                 Title = "Сохранить рабочий проект AI CutPro",
@@ -2386,11 +2385,14 @@ public partial class MainWindow : Window
                     { Patterns = ["*.json"] }]
             });
             if (file is null) return;
-            await using var stream = await file.OpenWriteAsync();
-            stream.SetLength(0);
-            await using var writer = new StreamWriter(stream);
-            await writer.WriteAsync(json);
-            await writer.FlushAsync();
+            // A storage provider without a local path cannot guarantee a
+            // same-directory replacement. Refuse rather than truncate it.
+            if (!file.Path.IsFile)
+                throw new NotSupportedException(
+                    "Для безопасной записи выберите локальный файл проекта.");
+            var localPath = file.Path.LocalPath;
+            await System.Threading.Tasks.Task.Run(() =>
+                CutProjectFile.Save(localPath, candidate));
             _project = candidate;
             StatusText.Text = candidate.DxfWorkspace is null
                 ? "Проект сохранён в JSON без DXF. Команд станку нет."

@@ -4711,6 +4711,62 @@ var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
 Assert(plainCopy.DxfWorkspace is null,
     "Existing project files without DXF workspace remain compatible");
+// A1: exercise actual filesystem persistence independently of native pickers.
+// A rejected snapshot must leave an existing valid project untouched.
+var persistenceDirectory = Path.Combine(Path.GetTempPath(),
+    "aicutpro-persistence-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(persistenceDirectory);
+try
+{
+    var persistencePath = Path.Combine(persistenceDirectory, "project.json");
+    CutProjectFile.Save(persistencePath, projectWithDxf);
+    var persistedOriginal = File.ReadAllText(persistencePath);
+    var persistedLoaded = CutProjectSerializer.Deserialize(persistedOriginal);
+    var persistedTechnology = CutProjectDxfWorkspaceCodec.Load(
+        persistedLoaded.DxfWorkspace!, persistedLoaded.Sheet);
+    Assert(persistedTechnology.MixedChains.TryGet(1, out var persistedArc) &&
+           persistedArc == bundleAnnotation,
+        "Local project file saves and reopens the original ARC assignment");
+
+    bool invalidWriteRefused = false;
+    try
+    {
+        CutProjectFile.Save(persistencePath,
+            projectWithDxf with { ThicknessMm = double.NaN });
+    }
+    catch (FormatException) { invalidWriteRefused = true; }
+    Assert(invalidWriteRefused &&
+           File.ReadAllText(persistencePath) == persistedOriginal,
+        "Invalid project save leaves the previous file unchanged");
+
+    var renamedProject = projectWithDxf with { Name = "Updated project" };
+    CutProjectFile.Save(persistencePath, renamedProject);
+    var persistedUpdated = CutProjectSerializer.Deserialize(
+        File.ReadAllText(persistencePath));
+    Assert(persistedUpdated.Name == renamedProject.Name &&
+           persistedUpdated.DxfWorkspace == projectWithDxf.DxfWorkspace,
+        "Successful overwrite preserves embedded DXF and all annotation sidecars");
+
+    // A directory is not a writable file destination. The staging write may
+    // succeed, but failed final replacement must not destroy that directory.
+    var invalidDestination = Path.Combine(persistenceDirectory, "directory.json");
+    Directory.CreateDirectory(invalidDestination);
+    var sentinel = Path.Combine(invalidDestination, "sentinel.txt");
+    File.WriteAllText(sentinel, "retain");
+    bool replacementRefused = false;
+    try { CutProjectFile.Save(invalidDestination, renamedProject); }
+    catch (IOException) { replacementRefused = true; }
+    catch (UnauthorizedAccessException) { replacementRefused = true; }
+    Assert(replacementRefused && File.ReadAllText(sentinel) == "retain",
+        "Failed destination replacement cannot remove existing directory data");
+    Assert(!Directory.EnumerateFiles(persistenceDirectory, ".aicutpro-*.tmp").Any(),
+        "Successful and refused local saves leave no temporary project files");
+}
+finally
+{
+    Directory.Delete(persistenceDirectory, recursive: true);
+}
+
 bool RejectBundledProject(CutProject changed)
 {
     try { CutProjectSerializer.Serialize(changed); return false; }
