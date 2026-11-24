@@ -501,6 +501,17 @@ public partial class MainWindow : Window
         catch (Exception ex) { ReportDxfImportFailure(ex); }
     }
 
+    private ProjectOperationSnapshot CaptureProjectOperation() =>
+        new(_project, _dxfPreview, _selectedProjectPart);
+
+    private void RequireCurrentProjectOperation(ProjectOperationSnapshot snapshot)
+    {
+        if (!snapshot.IsCurrent(_project, _dxfPreview, _selectedProjectPart,
+                _activeOperationsEditor is { IsVisible: true }))
+            throw new FormatException(
+                "Проект изменился во время файловой операции. Повторите действие.");
+    }
+
     private async void ReplaceProjectDxfClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -511,6 +522,7 @@ public partial class MainWindow : Window
             if (_activeOperationsEditor is { IsVisible: true })
                 throw new FormatException("Закройте редактор назначений перед заменой DXF.");
 
+            var snapshot = CaptureProjectOperation();
             var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
                 Title = "Выбрать новый исходный DXF проекта (миллиметры)",
@@ -533,6 +545,7 @@ public partial class MainWindow : Window
             if (bytes.Length == 0 || bytes.Any(b => b > 127))
                 throw new FormatException(
                     "Для безопасной замены поддерживается только непустой ASCII DXF с явными миллиметрами.");
+            RequireCurrentProjectOperation(snapshot);
             var source = System.Text.Encoding.ASCII.GetString(bytes);
             if (string.Equals(_project.DxfWorkspace.SourceAsciiDxf, source, StringComparison.Ordinal))
             {
@@ -610,8 +623,7 @@ public partial class MainWindow : Window
                 StatusText.Text = "Замена отменена. Исходный DXF и назначения не изменены.";
                 return;
             }
-            if (_activeOperationsEditor is { IsVisible: true })
-                throw new FormatException("Редактор назначений был открыт во время подтверждения.");
+            RequireCurrentProjectOperation(snapshot);
             AdoptProject(candidate);
             StatusText.Text = "DXF заменён, все прежние назначения сброшены. " +
                               "Сохраните проект в JSON. CAM и резка запрещены.";
@@ -2375,6 +2387,7 @@ public partial class MainWindow : Window
                 throw new FormatException("Закройте редактор технологических назначений перед сохранением проекта.");
             if (_dxfPreview is not null && _project.DxfWorkspace is null)
                 throw new FormatException("Импортированный DXF ещё не включён в проект. Сохранение остановлено во избежание потери чертежа.");
+            var snapshot = CaptureProjectOperation();
             var candidate = ReadProjectFields();
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
@@ -2385,6 +2398,7 @@ public partial class MainWindow : Window
                     { Patterns = ["*.json"] }]
             });
             if (file is null) return;
+            RequireCurrentProjectOperation(snapshot);
             // A storage provider without a local path cannot guarantee a
             // same-directory replacement. Refuse rather than truncate it.
             if (!file.Path.IsFile)
@@ -2393,6 +2407,22 @@ public partial class MainWindow : Window
             var localPath = file.Path.LocalPath;
             await System.Threading.Tasks.Task.Run(() =>
                 CutProjectFile.Save(localPath, candidate));
+            if (!snapshot.IsCurrent(_project, _dxfPreview, _selectedProjectPart,
+                    _activeOperationsEditor is { IsVisible: true }))
+            {
+                StatusText.Text = "Выбранный снимок сохранён в файл. " +
+                    "Текущий проект изменился и не был заменён старым снимком.";
+                return;
+            }
+            // Saving a snapshot must not overwrite the live model with stale
+            // form values entered before asynchronous file selection.
+            var currentFields = ReadProjectFields();
+            if (CutProjectSerializer.Serialize(currentFields) !=
+                CutProjectSerializer.Serialize(candidate))
+            {
+                StatusText.Text = "Снимок проекта сохранён. Новые изменения формы не сохранены.";
+                return;
+            }
             _project = candidate;
             StatusText.Text = candidate.DxfWorkspace is null
                 ? "Проект сохранён в JSON без DXF. Команд станку нет."
@@ -2409,8 +2439,10 @@ public partial class MainWindow : Window
     {
         try
         {
+            var snapshot = CaptureProjectOperation();
             if (!await ConfirmReplaceActiveDxfProjectAsync())
                 return;
+            RequireCurrentProjectOperation(snapshot);
             var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
             {
                 Title = "Открыть рабочий проект AI CutPro",
@@ -2433,6 +2465,7 @@ public partial class MainWindow : Window
             }
             if (read > 20_000_000) throw new FormatException("Файл проекта слишком большой.");
             var loaded = CutProjectSerializer.Deserialize(new string(buffer, 0, read));
+            RequireCurrentProjectOperation(snapshot);
             _selectedProjectPart = 0;
             AdoptProject(loaded);
             StatusText.Text = $"Проект «{loaded.Name}» открыт: {loaded.Parts.Count} деталей, лист {loaded.Sheet.WidthMm:0.###} × {loaded.Sheet.HeightMm:0.###} мм.";

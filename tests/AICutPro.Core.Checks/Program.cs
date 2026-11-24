@@ -4706,6 +4706,18 @@ foreach (var excessiveCurvedSource in new[] { beyondCircle, beyondSeamArc })
         "Circle/ARC envelope outside coordinate bound is rejected atomically");
 }
 
+// A1: delayed file operations must not adopt stale project or preview state.
+var pendingFileOperation = new ProjectOperationSnapshot(projectWithDxf, bundleSource, 0);
+Assert(pendingFileOperation.IsCurrent(projectWithDxf, bundleSource, 0, false),
+    "Unchanged project and DXF preview can complete file operation");
+Assert(!pendingFileOperation.IsCurrent(projectWithDxf with { Name = "Changed" },
+           bundleSource, 0, false) &&
+       !pendingFileOperation.IsCurrent(projectWithDxf,
+           DxfReader.Parse(bundledAsciiDxf), 0, false) &&
+       !pendingFileOperation.IsCurrent(projectWithDxf, bundleSource, 1, false) &&
+       !pendingFileOperation.IsCurrent(projectWithDxf, bundleSource, 0, true),
+    "New project, new preview, changed selection or active editor invalidate old operation");
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
