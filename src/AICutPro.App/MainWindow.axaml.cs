@@ -540,8 +540,32 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // Prepare and validate the replacement without changing the live
-            // project. Every old technology assignment will be discarded.
+            // Preserve all assignments only if BOTH sidecar identities match
+            // every ordered DXF shape exactly. Cosmetic/header-only source
+            // changes must not force users to rebuild valid technology.
+            CutProject? preserved = null;
+            try
+            {
+                preserved = CutProjectDxfWorkspaceCodec
+                    .ReplaceSourcePreservingExactGeometry(_project, source);
+            }
+            catch (FormatException)
+            {
+                // Any difference or malformed source falls through to the
+                // existing explicit full-reset flow (which validates again).
+            }
+            if (preserved is not null)
+            {
+                AdoptProject(preserved);
+                StatusText.Text =
+                    "Текст DXF обновлён: геометрия проверена по всем объектам, " +
+                    "технологические назначения сохранены. Запишите проект в JSON.";
+                return;
+            }
+
+            // Source geometry differs: validate first, then request the
+            // operator's explicit consent to clear every assignment.
+
             var existing = CutProjectDxfWorkspaceCodec.Load(
                 _project.DxfWorkspace, _project.Sheet);
             var candidate = CutProjectDxfWorkspaceCodec.ReplaceSource(

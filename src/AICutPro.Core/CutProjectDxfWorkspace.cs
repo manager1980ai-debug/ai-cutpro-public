@@ -71,6 +71,50 @@ public static class CutProjectDxfWorkspaceCodec
     }
 
     /// <summary>
+    /// Updates the textual DXF while preserving every technology assignment
+    /// ONLY when the complete ordered shape identities remain exactly equal.
+    /// Both original sidecars independently validate all source shapes, not
+    /// just the ones with assigned operations. No geometric tolerance, index
+    /// guessing or reordering is permitted.
+    /// </summary>
+    public static CutProject ReplaceSourcePreservingExactGeometry(
+        CutProject project, string replacementAsciiDxf)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        CutProjectSerializer.Validate(project);
+        ArgumentNullException.ThrowIfNull(replacementAsciiDxf);
+        var previous = project.DxfWorkspace ??
+            throw new FormatException("There is no embedded DXF to preserve.");
+        if (string.Equals(previous.SourceAsciiDxf, replacementAsciiDxf,
+                StringComparison.Ordinal))
+            return project;
+
+        // Parse and validate new source before considering any technology.
+        var replacementDocument = ParseSource(replacementAsciiDxf);
+        var original = Load(previous, project.Sheet);
+        // The mixed sidecar pins identities for ALL source entities, including
+        // unassigned lines, arcs, polylines and circles. Reject any difference.
+        SheetMixedChainSidecar.Restore(
+            previous.MixedAnnotationsJson, replacementDocument.Shapes,
+            project.Sheet, new SheetMixedChainAssignmentRegister());
+        // LINE identities and all original operations are additionally checked.
+        SheetLineAssignmentSidecar.Restore(
+            previous.LineAnnotationsJson,
+            replacementDocument.Shapes.OfType<DxfLine>().ToArray(), project.Sheet,
+            new SheetLineAssignmentRegister(), new SheetUShapeAssignmentRegister(),
+            new SheetChainAssignmentRegister());
+
+        var candidate = project with
+        {
+            DxfWorkspace = Create(replacementAsciiDxf, project.Sheet,
+                original.Lines, original.UGroups, original.StraightChains,
+                original.MixedChains)
+        };
+        CutProjectSerializer.Validate(candidate);
+        return candidate;
+    }
+
+    /// <summary>
     /// Safely replaces the source DXF within a project. Annotation transfer across
     /// changed geometry is never guessed: the operator must explicitly request
     /// discarding every old annotation. Identical source may retain them.

@@ -4335,6 +4335,46 @@ Assert(ReferenceEquals(
         projectWithDxf, bundledAsciiDxf, discardExistingAssignments: false),
     projectWithDxf),
     "Identical DXF bytes retain existing technology assignments");
+// Same ordered geometry but different DXF source text: preserve the complete
+// saved technology state, including the ARC mixed-chain assignment.
+var headerOnlyDxf = "999\nPreview metadata changed\n" + bundledAsciiDxf;
+var preservedProject = CutProjectDxfWorkspaceCodec
+    .ReplaceSourcePreservingExactGeometry(projectWithDxf, headerOnlyDxf);
+var preservedRoundtrip = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(preservedProject));
+var preservedTechnology = CutProjectDxfWorkspaceCodec.Load(
+    preservedRoundtrip.DxfWorkspace!, preservedRoundtrip.Sheet);
+Assert(preservedRoundtrip.DxfWorkspace!.SourceAsciiDxf == headerOnlyDxf &&
+       preservedTechnology.MixedChains.TryGet(1, out var preservedArc) &&
+       preservedArc == bundleAnnotation &&
+       preservedRoundtrip.DxfWorkspace.LineAnnotationsJson ==
+           bundle.LineAnnotationsJson &&
+       preservedRoundtrip.DxfWorkspace.MixedAnnotationsJson ==
+           bundle.MixedAnnotationsJson &&
+       projectWithDxf.DxfWorkspace!.SourceAsciiDxf == bundledAsciiDxf,
+    "Metadata-only DXF replacement preserves every validated technology assignment");
+Assert(ReferenceEquals(
+    CutProjectDxfWorkspaceCodec.ReplaceSourcePreservingExactGeometry(
+        projectWithDxf, bundledAsciiDxf), projectWithDxf),
+    "Identical DXF source returns original project without changes");
+foreach (var changedGeometry in new[]
+{
+    newSourceDxf, // Changed layer identity on an assigned shape.
+    bundledAsciiDxf.Replace("11\n80\n21\n110", "11\n81\n21\n110")
+})
+{
+    var refusedTransfer = false;
+    try
+    {
+        _ = CutProjectDxfWorkspaceCodec.ReplaceSourcePreservingExactGeometry(
+            projectWithDxf, changedGeometry);
+    }
+    catch (FormatException) { refusedTransfer = true; }
+    Assert(refusedTransfer &&
+           projectWithDxf.DxfWorkspace!.SourceAsciiDxf == bundledAsciiDxf,
+        "Any changed source entity prevents automatic technology preservation");
+}
+
 var resetProject = CutProjectDxfWorkspaceCodec.ReplaceSource(
     projectWithDxf, newSourceDxf, discardExistingAssignments: true);
 var resetRoundtrip = CutProjectSerializer.Deserialize(
