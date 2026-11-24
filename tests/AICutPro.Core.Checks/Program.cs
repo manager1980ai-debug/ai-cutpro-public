@@ -4375,6 +4375,111 @@ foreach (var changedGeometry in new[]
         "Any changed source entity prevents automatic technology preservation");
 }
 
+// A1/B1.2: exact-geometry preservation also covers legacy LINE, U-group
+// and connected straight-chain sidecars, not only mixed ARC annotations.
+// Geometry order is part of the identity even for unassigned DXF entities.
+static string SourceForLineFixtures(IReadOnlyList<DxfLine> items)
+{
+    var result = new System.Text.StringBuilder(
+        "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+        "0\nSECTION\n2\nENTITIES\n");
+    foreach (var line in items)
+    {
+        result.Append("0\nLINE\n8\n").Append(line.Layer)
+            .Append("\n10\n").Append(line.Start.X.ToString("R",
+                System.Globalization.CultureInfo.InvariantCulture))
+            .Append("\n20\n").Append(line.Start.Y.ToString("R",
+                System.Globalization.CultureInfo.InvariantCulture))
+            .Append("\n11\n").Append(line.End.X.ToString("R",
+                System.Globalization.CultureInfo.InvariantCulture))
+            .Append("\n21\n").Append(line.End.Y.ToString("R",
+                System.Globalization.CultureInfo.InvariantCulture)).Append('\n');
+    }
+    return result.Append("0\nENDSEC\n0\nEOF\n").ToString();
+}
+static CutProject ProjectForLineFixtures(
+    string source, Sheet sheet,
+    SheetLineAssignmentRegister lines,
+    SheetUShapeAssignmentRegister uGroups,
+    SheetChainAssignmentRegister chains)
+{
+    var embedded = CutProjectDxfWorkspaceCodec.Create(source, sheet,
+        lines, uGroups, chains, new SheetMixedChainAssignmentRegister());
+    return new CutProject(CutProject.CurrentFormatVersion,
+        "Saved line technology", sheet, [new Part("Sample", 10, 10, 1)],
+        "Steel", 2, embedded);
+}
+var loneAssignments = new SheetLineAssignmentRegister();
+var firstBundledLine = (DxfLine)bundleSource.Shapes[0];
+Assert(loneAssignments.Assign(0, firstBundledLine.Start, firstBundledLine.End,
+    new SheetLineOperation(SheetOperationKind.OpenThroughCut,
+        firstBundledLine.Start, firstBundledLine.End,
+        Processing: SheetLineProcessingMode.ThroughCut),
+    mixedOpenSheet).IsValid, "Standalone legacy LINE fixture is valid");
+var standaloneLineProject = ProjectForLineFixtures(
+    bundledAsciiDxf, mixedOpenSheet, loneAssignments,
+    new SheetUShapeAssignmentRegister(), new SheetChainAssignmentRegister());
+var preservedLine = CutProjectDxfWorkspaceCodec.ReplaceSourcePreservingExactGeometry(
+    standaloneLineProject, headerOnlyDxf);
+var preservedLineLoad = CutProjectDxfWorkspaceCodec.Load(
+    preservedLine.DxfWorkspace!, preservedLine.Sheet);
+Assert(preservedLineLoad.Lines.TryGet(0, out var lineOperation) &&
+       lineOperation == loneAssignments.Snapshot()[0] &&
+       !preservedLineLoad.Lines.CanGenerateMachineCommands,
+    "Metadata-only source changes preserve exact legacy LINE technology");
+
+var uDxfSource = SourceForLineFixtures(uAnchorLines);
+var uProject = ProjectForLineFixtures(uDxfSource, uSheet,
+    new SheetLineAssignmentRegister(), uAnnotations,
+    new SheetChainAssignmentRegister());
+var restoredUProject = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(
+        CutProjectDxfWorkspaceCodec.ReplaceSourcePreservingExactGeometry(
+            uProject, "999\nU group metadata\n" + uDxfSource)));
+var restoredU = CutProjectDxfWorkspaceCodec.Load(
+    restoredUProject.DxfWorkspace!, uSheet);
+Assert(restoredU.UGroups.TryGet(uAssigned.BaseLineIndex, out var preservedU) &&
+       preservedU == uAssigned,
+    "Saved U-shaped technology survives exact DXF and JSON roundtrip");
+
+var chainDxfSource = SourceForLineFixtures(chainImported);
+var chainProject = ProjectForLineFixtures(chainDxfSource, chainSheet,
+    new SheetLineAssignmentRegister(),
+    new SheetUShapeAssignmentRegister(), chainRegistry);
+var restoredChainProject = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(
+        CutProjectDxfWorkspaceCodec.ReplaceSourcePreservingExactGeometry(
+            chainProject, "999\nStraight chain metadata\n" + chainDxfSource)));
+var restoredChain = CutProjectDxfWorkspaceCodec.Load(
+    restoredChainProject.DxfWorkspace!, chainSheet);
+Assert(restoredChain.StraightChains.TryGet(chainAnnotation.SelectedLineIndex,
+        out var preservedChain) && preservedChain == chainAnnotation,
+    "Connected LINE chain annotation survives unchanged geometry and project reopen");
+
+var swappedUEntities = SourceForLineFixtures(uAnchorLines.Reverse().ToArray());
+var rejectedReorderedSource = false;
+try
+{
+    _ = CutProjectDxfWorkspaceCodec.ReplaceSourcePreservingExactGeometry(
+        uProject, swappedUEntities);
+}
+catch (FormatException) { rejectedReorderedSource = true; }
+Assert(rejectedReorderedSource &&
+       uProject.DxfWorkspace!.SourceAsciiDxf == uDxfSource,
+    "Swapping same geometric entities cannot silently reassign U technology");
+var changedUnassignedSource = SourceForLineFixtures([
+    uAnchorLines[0], uAnchorLines[1] with { End = new Point2(101, 80) }
+]);
+var rejectedUnassignedGeometry = false;
+try
+{
+    _ = CutProjectDxfWorkspaceCodec.ReplaceSourcePreservingExactGeometry(
+        uProject, changedUnassignedSource);
+}
+catch (FormatException) { rejectedUnassignedGeometry = true; }
+Assert(rejectedUnassignedGeometry,
+    "Even unassigned geometric differences prevent automatic sidecar preservation");
+
 var resetProject = CutProjectDxfWorkspaceCodec.ReplaceSource(
     projectWithDxf, newSourceDxf, discardExistingAssignments: true);
 var resetRoundtrip = CutProjectSerializer.Deserialize(
