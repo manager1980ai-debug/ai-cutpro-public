@@ -112,6 +112,7 @@ public static class SheetMixedChainSidecar
         var actual = Identities(shapes, sheet);
         if (string.IsNullOrWhiteSpace(json) || json.Length > MaxJsonChars)
             throw new FormatException("Invalid mixed-chain sidecar size.");
+        SidecarJsonGuard.RejectDuplicateProperties(json);
         Payload? payload;
         try { payload = JsonSerializer.Deserialize<Payload>(json); }
         catch (JsonException ex)

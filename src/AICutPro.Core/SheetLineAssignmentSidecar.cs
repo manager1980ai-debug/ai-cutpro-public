@@ -95,6 +95,9 @@ public static class SheetLineAssignmentSidecar
         CheckDocument(lines, sheet);
         if (string.IsNullOrWhiteSpace(json) || json.Length > MaximumJsonChars)
             throw new FormatException("Invalid annotation sidecar size.");
+        // Reject duplicate properties before a permissive serializer can
+        // silently select one of the conflicting technology values.
+        SidecarJsonGuard.RejectDuplicateProperties(json);
         Payload? payload;
         try { payload = JsonSerializer.Deserialize<Payload>(json, JsonOptions); }
         catch (JsonException exc) { throw new FormatException("Malformed sidecar JSON.", exc); }

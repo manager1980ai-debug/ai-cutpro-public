@@ -4534,6 +4534,33 @@ bool RejectBundledProject(CutProject changed)
     try { CutProjectSerializer.Serialize(changed); return false; }
     catch (FormatException) { return true; }
 }
+// A1: nested technology JSON is stored as a string inside the main
+// project; duplicate keys inside either sidecar must be rejected explicitly.
+var legacyWithDuplicateVersion =
+    "{\"Version\":999," + bundle.LineAnnotationsJson[1..];
+var mixedWithDuplicateVersion =
+    "{\"Version\":999," + bundle.MixedAnnotationsJson[1..];
+Assert(RejectBundledProject(projectWithDxf with
+{
+    DxfWorkspace = bundle with { LineAnnotationsJson = legacyWithDuplicateVersion }
+}), "Duplicate legacy sidecar version rejected without losing DXF project");
+Assert(RejectBundledProject(projectWithDxf with
+{
+    DxfWorkspace = bundle with { MixedAnnotationsJson = mixedWithDuplicateVersion }
+}), "Duplicate mixed sidecar version rejected without reassigning technology");
+var mixedWithNestedDuplicate = bundle.MixedAnnotationsJson.Replace(
+    "\"SelectedShapeIndex\":1",
+    "\"SelectedShapeIndex\":1,\"SelectedShapeIndex\":2",
+    StringComparison.Ordinal);
+Assert(mixedWithNestedDuplicate != bundle.MixedAnnotationsJson &&
+       RejectBundledProject(projectWithDxf with
+       {
+           DxfWorkspace = bundle with { MixedAnnotationsJson = mixedWithNestedDuplicate }
+       }), "Nested duplicate shape index in technology annotation rejected");
+Assert(CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(projectWithDxf)).DxfWorkspace is not null,
+    "Unmodified legacy and mixed sidecars still reopen successfully");
+
 Assert(RejectBundledProject(projectWithDxf with
 {
     DxfWorkspace = bundle with {
