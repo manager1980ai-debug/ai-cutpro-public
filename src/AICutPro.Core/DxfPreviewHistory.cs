@@ -13,13 +13,30 @@ public sealed class DxfPreviewHistory
     private readonly List<DxfImportResult> _states = [];
     private readonly List<IReadOnlyList<PreviewAxisRule>> _axisRules = [];
     private readonly List<IReadOnlyList<PreviewLengthRule>> _lengthRules = [];
+    private readonly List<CutProjectDxfWorkspace?> _workspaces = [];
     private int _index;
 
-    public DxfPreviewHistory(DxfImportResult initial)
+    public DxfPreviewHistory(DxfImportResult initial, CutProjectDxfWorkspace? workspace = null)
     {
         _states.Add(Snapshot(initial));
         _axisRules.Add([]);
         _lengthRules.Add([]);
+        _workspaces.Add(workspace);
+    }
+
+    public CutProjectDxfWorkspace? CurrentWorkspace => _workspaces[_index];
+
+    public void UpdateCurrentWorkspace(CutProjectDxfWorkspace workspace)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        _workspaces[_index] = workspace;
+        if (CanRedo)
+        {
+            _states.RemoveRange(_index+1,_states.Count-1-_index);
+            _axisRules.RemoveRange(_index+1,_axisRules.Count-1-_index);
+            _lengthRules.RemoveRange(_index+1,_lengthRules.Count-1-_index);
+            _workspaces.RemoveRange(_index+1,_workspaces.Count-1-_index);
+        }
     }
 
     public bool CanUndo => _index > 0;
@@ -46,7 +63,13 @@ public sealed class DxfPreviewHistory
 
     public void Push(DxfImportResult verifiedEdit,
                      IReadOnlyList<PreviewAxisRule> rules,
-                     IReadOnlyList<PreviewLengthRule> lengths)
+                     IReadOnlyList<PreviewLengthRule> lengths) =>
+        Push(verifiedEdit, rules, lengths, CurrentWorkspace);
+
+    public void Push(DxfImportResult verifiedEdit,
+                     IReadOnlyList<PreviewAxisRule> rules,
+                     IReadOnlyList<PreviewLengthRule> lengths,
+                     CutProjectDxfWorkspace? workspace)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(lengths);
@@ -60,15 +83,18 @@ public sealed class DxfPreviewHistory
             _states.RemoveRange(_index+1,_states.Count-1-_index);
             _axisRules.RemoveRange(_index+1,_axisRules.Count-1-_index);
             _lengthRules.RemoveRange(_index+1,_lengthRules.Count-1-_index);
+            _workspaces.RemoveRange(_index+1,_workspaces.Count-1-_index);
         }
         _states.Add(clone);
         _axisRules.Add(rules.ToArray());
         _lengthRules.Add(lengths.ToArray());
+        _workspaces.Add(workspace);
         if(_states.Count>MaximumStates)
         {
             _states.RemoveAt(0);
             _axisRules.RemoveAt(0);
             _lengthRules.RemoveAt(0);
+            _workspaces.RemoveAt(0);
         }
         _index=_states.Count-1;
     }

@@ -4718,6 +4718,32 @@ Assert(!pendingFileOperation.IsCurrent(projectWithDxf with { Name = "Changed" },
        !pendingFileOperation.IsCurrent(projectWithDxf, bundleSource, 0, true),
     "New project, new preview, changed selection or active editor invalidate old operation");
 
+// A1: source replacement and technology are a single history step.
+var embeddedHistory = new DxfPreviewHistory(bundleSource, bundle);
+var cleanHistoryProject = CutProjectDxfWorkspaceCodec.ReplaceSource(
+    projectWithDxf, newSourceDxf, discardExistingAssignments: true);
+var cleanHistoryWorkspace = cleanHistoryProject.DxfWorkspace!;
+var cleanHistoryDocument = CutProjectDxfWorkspaceCodec.Load(
+    cleanHistoryWorkspace, projectWithDxf.Sheet).Document;
+embeddedHistory.Push(cleanHistoryDocument, [], [], cleanHistoryWorkspace);
+Assert(embeddedHistory.CurrentWorkspace == cleanHistoryWorkspace &&
+       embeddedHistory.CanUndo, "Replacement creates one joint history step");
+embeddedHistory.Undo();
+Assert(embeddedHistory.CurrentWorkspace == bundle &&
+       CutProjectDxfWorkspaceCodec.Load(embeddedHistory.CurrentWorkspace!,
+           projectWithDxf.Sheet).MixedChains.TryGet(1, out var undoArc) &&
+       undoArc == bundleAnnotation,
+    "Undo restores original source and its exact mixed technology");
+embeddedHistory.Redo();
+Assert(embeddedHistory.CurrentWorkspace == cleanHistoryWorkspace &&
+       CutProjectDxfWorkspaceCodec.Load(embeddedHistory.CurrentWorkspace!,
+           projectWithDxf.Sheet).MixedChains.Count == 0,
+    "Redo restores changed source with cleared technology");
+embeddedHistory.Undo();
+embeddedHistory.UpdateCurrentWorkspace(bundle);
+Assert(!embeddedHistory.CanRedo && embeddedHistory.CurrentWorkspace == bundle,
+    "An annotation edit after undo invalidates stale redo branch");
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));

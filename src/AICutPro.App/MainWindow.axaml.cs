@@ -445,6 +445,7 @@ public partial class MainWindow : Window
                         var snapshot = editor.ExportEmbeddedWorkspace(embedded.SourceAsciiDxf);
                         // Fail closed: the project is changed only on successful
                         // exact-geometry validation of all technology registers.
+                        _dxfHistory?.UpdateCurrentWorkspace(snapshot);
                         _project = _project with { DxfWorkspace = snapshot };
                         StatusText.Text = "Назначения DXF сохранены в текущем проекте (в памяти). Запишите JSON.";
                     }
@@ -569,7 +570,7 @@ public partial class MainWindow : Window
             }
             if (preserved is not null)
             {
-                AdoptProject(preserved);
+                CommitEmbeddedReplacement(preserved);
                 StatusText.Text =
                     "Текст DXF обновлён: геометрия проверена по всем объектам, " +
                     "технологические назначения сохранены. Запишите проект в JSON.";
@@ -624,7 +625,7 @@ public partial class MainWindow : Window
                 return;
             }
             RequireCurrentProjectOperation(snapshot);
-            AdoptProject(candidate);
+            CommitEmbeddedReplacement(candidate);
             StatusText.Text = "DXF заменён, все прежние назначения сброшены. " +
                               "Сохраните проект в JSON. CAM и резка запрещены.";
         }
@@ -633,6 +634,24 @@ public partial class MainWindow : Window
         {
             StatusText.Text = "Замена DXF отклонена без изменения проекта: " + ex.Message;
         }
+    }
+
+    private void CommitEmbeddedReplacement(CutProject candidate)
+    {
+        if (_dxfHistory is null || candidate.DxfWorkspace is null)
+            throw new FormatException("Нет истории встроенного DXF.");
+        var loaded = CutProjectDxfWorkspaceCodec.Load(candidate.DxfWorkspace, candidate.Sheet);
+        // A source replacement clears drafting constraints but keeps the old
+        // source and its annotations in the undo snapshot.
+        _dxfHistory.Push(loaded.Document, [], [], candidate.DxfWorkspace);
+        _project = candidate;
+        _dxfPreview = _dxfHistory.Current;
+        _selectedDxfLine = null;
+        _dxfDiagnostics = [];
+        ResetView();
+        UpdatePartCard();
+        UpdateHoleSummary();
+        RenderSheet();
     }
 
     private void ImportDxfBytes(byte[] bytes)
@@ -940,7 +959,16 @@ public partial class MainWindow : Window
             StatusText.Text = "Нет изменений DXF для отмены.";
             return;
         }
+        if (_activeOperationsEditor is { IsVisible: true })
+        {
+            StatusText.Text = "Закройте редактор назначений перед изменением истории DXF.";
+            return;
+        }
         _dxfPreview = _dxfHistory.Undo();
+        if (_project.DxfWorkspace is not null)
+            _project = _project with { DxfWorkspace = _dxfHistory.CurrentWorkspace };
+        _selectedDxfLine = null;
+        _dxfDiagnostics = [];
         ResetView();
         UpdatePartCard();
         UpdateHoleSummary();
@@ -957,7 +985,16 @@ public partial class MainWindow : Window
             StatusText.Text = "Нет изменений DXF для повтора.";
             return;
         }
+        if (_activeOperationsEditor is { IsVisible: true })
+        {
+            StatusText.Text = "Закройте редактор назначений перед изменением истории DXF.";
+            return;
+        }
         _dxfPreview = _dxfHistory.Redo();
+        if (_project.DxfWorkspace is not null)
+            _project = _project with { DxfWorkspace = _dxfHistory.CurrentWorkspace };
+        _selectedDxfLine = null;
+        _dxfDiagnostics = [];
         ResetView();
         UpdatePartCard();
         UpdateHoleSummary();
@@ -2263,7 +2300,7 @@ public partial class MainWindow : Window
         _selectedPlacement = null;
         _selectedDxfLine = null;
         _dxfPreview = restoredDxf;
-        _dxfHistory = restoredDxf is null ? null : new DxfPreviewHistory(restoredDxf);
+        _dxfHistory = restoredDxf is null ? null : new DxfPreviewHistory(restoredDxf, candidate.DxfWorkspace);
         _dxfDiagnostics = [];
         ShowProjectFields(candidate);
         TableWidthBox.Text = workspace.Table.WidthMm.ToString("R", CultureInfo.InvariantCulture);
