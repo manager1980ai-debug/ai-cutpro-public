@@ -195,9 +195,51 @@ public static class CutProjectDxfWorkspaceCodec
             DxfBulgedPolyline bulged => bulged.Vertices.Any(point => !BoundedPoint(point)),
             _ => true
         });
-        if (outOfRange)
+        if (outOfRange || parsed.Shapes.Any(shape => !CurvedBoundsFit(shape)))
             throw new FormatException(
                 "Embedded DXF has unsupported or out-of-range geometry (maximum 1000000 mm).");
         return parsed;
+
+        // A center inside the allowed coordinates does not guarantee its
+        // CIRCLE/ARC/bulge lies inside: inspect analytic extrema, not chords.
+        static bool CurvedBoundsFit(DxfShape shape)
+        {
+            static bool Fits(PreviewContourBoundsResult bounds) =>
+                bounds.IsValid &&
+                Math.Abs(bounds.MinX) <= maximumSourceCoordinateMm &&
+                Math.Abs(bounds.MaxX) <= maximumSourceCoordinateMm &&
+                Math.Abs(bounds.MinY) <= maximumSourceCoordinateMm &&
+                Math.Abs(bounds.MaxY) <= maximumSourceCoordinateMm;
+            if (shape is DxfCircle circle)
+                return FitsCircle(circle.Center, circle.Radius);
+            if (shape is DxfArc arc)
+            {
+                var sweep = ((arc.EndDeg - arc.StartDeg) % 360 + 360) % 360;
+                if (sweep < 1e-9)
+                    return false;
+                return Fits(PreviewContourBounds.Measure(
+                    new PreviewPath([
+                        new PreviewArc(
+                            new PreviewPoint(arc.Center.X, arc.Center.Y),
+                            arc.Radius, arc.StartDeg, sweep)
+                    ], false)));
+            }
+            if (shape is DxfBulgedPolyline bulged)
+                return Fits(PreviewContourBounds.Measure(DxfBulgePreview.Build(bulged)));
+            return true;
+        }
+
+        static bool FitsCircle(Point2 center, double radius)
+        {
+            return radius > 0 &&
+                double.IsFinite(center.X + radius) &&
+                double.IsFinite(center.X - radius) &&
+                double.IsFinite(center.Y + radius) &&
+                double.IsFinite(center.Y - radius) &&
+                Math.Abs(center.X + radius) <= maximumSourceCoordinateMm &&
+                Math.Abs(center.X - radius) <= maximumSourceCoordinateMm &&
+                Math.Abs(center.Y + radius) <= maximumSourceCoordinateMm &&
+                Math.Abs(center.Y - radius) <= maximumSourceCoordinateMm;
+        }
     }
 }

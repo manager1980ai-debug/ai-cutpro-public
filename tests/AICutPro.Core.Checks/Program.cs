@@ -4669,6 +4669,43 @@ foreach (var outOfRangeDxf in new[]
         "Out-of-range DXF cannot replace geometry or affect existing assignments");
 }
 
+// B3: source-center checks alone miss the analytic envelope of circles,
+// arcs crossing the 0-degree seam and curved bulge polylines.
+static string CurvedEnvelopeDxf(string entity) =>
+    "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n" +
+    "0\nSECTION\n2\nENTITIES\n" + entity +
+    "0\nENDSEC\n0\nEOF\n";
+var boundedCircle = CurvedEnvelopeDxf(
+    "0\nCIRCLE\n8\nB3\n10\n999998\n20\n0\n40\n2\n");
+var beyondCircle = CurvedEnvelopeDxf(
+    "0\nCIRCLE\n8\nB3\n10\n999999\n20\n0\n40\n2\n");
+var boundedArc = CurvedEnvelopeDxf(
+    "0\nARC\n8\nB3\n10\n999999\n20\n0\n40\n2\n50\n90\n51\n270\n");
+var beyondSeamArc = CurvedEnvelopeDxf(
+    "0\nARC\n8\nB3\n10\n999999\n20\n0\n40\n2\n50\n270\n51\n90\n");
+Assert(CutProjectDxfWorkspaceCodec.ReplaceSource(
+    CutProject.CreateDefault(), boundedCircle,
+    discardExistingAssignments: false).DxfWorkspace is not null,
+    "CIRCLE whose analytic extent exactly reaches the limit is accepted");
+Assert(CutProjectDxfWorkspaceCodec.ReplaceSource(
+    CutProject.CreateDefault(), boundedArc,
+    discardExistingAssignments: false).DxfWorkspace is not null,
+    "ARC with same center and radius but inward sweep remains in bounds");
+foreach (var excessiveCurvedSource in new[] { beyondCircle, beyondSeamArc })
+{
+    var rejectedEnvelope = false;
+    try
+    {
+        _ = CutProjectDxfWorkspaceCodec.ReplaceSource(
+            projectWithDxf, excessiveCurvedSource, discardExistingAssignments: true);
+    }
+    catch (FormatException) { rejectedEnvelope = true; }
+    Assert(rejectedEnvelope &&
+           projectWithDxf.DxfWorkspace!.SourceAsciiDxf == bundledAsciiDxf &&
+           projectWithDxf.DxfWorkspace!.MixedAnnotationsJson == bundle.MixedAnnotationsJson,
+        "Circle/ARC envelope outside coordinate bound is rejected atomically");
+}
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
