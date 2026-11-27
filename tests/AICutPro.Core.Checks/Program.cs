@@ -1153,6 +1153,21 @@ for (int caseNo=1;caseNo<=128;caseNo++)
            Math.Abs(measured.NetAreaMm2-expected)<=Math.Max(1e-7,expected*1e-9),
            $"Synthetic translated net area case {caseNo}");
 }
+// Independent manufacturing exports, pinned MIT-licensed FreeCAD source.
+foreach(var item in new[]{("Bottom_Plate_240mm_240mm.dxf",366),
+                          ("PC_Plate_117mm_122mm.dxf",132),
+                          ("Top_Plate_240mm_240mm.dxf",192)})
+{
+    var input=File.ReadAllBytes(Path.Combine("tests","fixtures","lgdxrobot2",item.Item1));
+    var imported=DxfFileReader.Read(input);
+    Assert(imported.AcadVersion=="AC1014" && imported.Document.InsUnits==4,
+           $"Manufacturing DXF {item.Item1}: R14 and mm");
+    Assert(imported.Document.Shapes.Count==item.Item2,
+           $"Manufacturing DXF {item.Item1}: entity count matches independent audit");
+    var gate=GeometryPreflight.Inspect(imported.Document,new Sheet(1000,1000));
+    Assert(!gate.CanGenerateMachineCommands,
+           $"Manufacturing DXF {item.Item1}: machine commands remain disabled");
+}
 // Licensed external DXF files from the CADCraft Corpus (not production blueprints).
 foreach(var name in new[]{"cadcraft-sample-bracket.dxf","cadcraft-sample-floorplan.dxf"})
 {
