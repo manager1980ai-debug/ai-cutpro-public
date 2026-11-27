@@ -74,7 +74,13 @@ def probe_project_picker_roundtrip(window):
                 raise RuntimeError("Cannot identify filename field: " + repr([
                     (e.element_info.automation_id, e.window_text()) for e in edits]))
             file_edit = filename_controls[0]
-        file_edit.set_edit_text(str(target))
+        # Native Explorer dialogs can expose a UIA Value that differs from
+        # their internal filename buffer after SetValue. Use actual keyboard
+        # input and commit it by leaving the field before submitting.
+        file_edit.set_focus()
+        file_edit.type_keys("^a", set_foreground=True)
+        file_edit.type_keys(str(target), with_spaces=True, pause=0.01,
+                            set_foreground=True)
         actual = file_edit.iface_value.CurrentValue
         if actual != str(target):
             raise RuntimeError("File picker filename did not update: " + repr(actual))
@@ -88,7 +94,8 @@ def probe_project_picker_roundtrip(window):
                                      dialog.descendants(control_type="Button")]))
         if len(buttons) != 1:
             raise RuntimeError("Ambiguous native picker submit buttons")
-        buttons[0].iface_invoke.Invoke()
+        # Physical click commits the filename edit before the shell handles OK.
+        buttons[0].click_input()
         return True
 
     if not use_picker("Сохранить проект (.json)", {"save", "сохранить"}):
