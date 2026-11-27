@@ -4740,9 +4740,17 @@ Assert(embeddedHistory.CurrentWorkspace == cleanHistoryWorkspace &&
            projectWithDxf.Sheet).MixedChains.Count == 0,
     "Redo restores changed source with cleared technology");
 embeddedHistory.Undo();
-embeddedHistory.UpdateCurrentWorkspace(bundle);
-Assert(!embeddedHistory.CanRedo && embeddedHistory.CurrentWorkspace == bundle,
-    "An annotation edit after undo invalidates stale redo branch");
+embeddedHistory.UpdateCurrentWorkspace(bundle with { });
+Assert(embeddedHistory.CanRedo && embeddedHistory.CurrentWorkspace == bundle,
+    "Unchanged annotation snapshot preserves redo");
+var changedHistoryAnnotations = CutProjectDxfWorkspaceCodec.Create(
+    bundledAsciiDxf, projectWithDxf.Sheet, new SheetLineAssignmentRegister(),
+    new SheetUShapeAssignmentRegister(), new SheetChainAssignmentRegister(),
+    new SheetMixedChainAssignmentRegister());
+embeddedHistory.UpdateCurrentWorkspace(changedHistoryAnnotations);
+Assert(!embeddedHistory.CanRedo &&
+       embeddedHistory.CurrentWorkspace == changedHistoryAnnotations,
+    "An actual annotation edit after undo invalidates stale redo branch");
 
 // A1/B2: edited entity serialization and project history must preserve CIRCLE identity.
 var editCircleDocument = DxfReader.Parse(boundedCircle);

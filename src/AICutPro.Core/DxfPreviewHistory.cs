@@ -29,6 +29,9 @@ public sealed class DxfPreviewHistory
     public void UpdateCurrentWorkspace(CutProjectDxfWorkspace workspace)
     {
         ArgumentNullException.ThrowIfNull(workspace);
+        // Opening and closing the editor without changes must not discard redo.
+        if (CurrentWorkspace == workspace)
+            return;
         _workspaces[_index] = workspace;
         if (CanRedo)
         {
