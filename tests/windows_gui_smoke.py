@@ -26,7 +26,7 @@ def probe_project_picker_roundtrip(window):
             raise RuntimeError("Missing project picker action: " + name)
         return matches[0]
 
-    def use_picker(action, submit_names):
+    def use_picker(action, submit_names, cancel=False):
         button_named(action).iface_invoke.Invoke()
         dialog = None
         for _ in range(50):
@@ -88,16 +88,20 @@ def probe_project_picker_roundtrip(window):
         # The Explorer common dialog can expose duplicate named buttons
         # through nested UIA providers. Submit via the focused filename
         # control's Enter key instead of guessing which button is real.
-        file_edit.type_keys("{ENTER}", set_foreground=True)
+        file_edit.type_keys("{ESC}" if cancel else "{ENTER}", set_foreground=True)
         for _ in range(50):
             if not any(w.handle == dialog.handle and w.is_visible()
                        for w in Desktop(backend="uia").windows()):
                 break
             time.sleep(0.2)
         else:
-            raise RuntimeError("Native picker did not close after Enter")
+            raise RuntimeError("Native picker did not close after keyboard submission")
         return True
 
+    if not use_picker("Сохранить проект (.json)", {"save", "сохранить"}, cancel=True):
+        raise RuntimeError("Native Save cancellation could not be verified")
+    if target.exists():
+        raise RuntimeError("Cancelled Save unexpectedly created the requested file")
     if not use_picker("Сохранить проект (.json)", {"save", "сохранить"}):
         return
     for _ in range(75):
@@ -115,6 +119,24 @@ def probe_project_picker_roundtrip(window):
     print("Native Save produced requested file: " + str(target))
     if saved["FormatVersion"] != 1 or not saved["Parts"]:
         raise RuntimeError("Saved project JSON is missing required fields")
+    original_bytes = target.read_bytes()
+    # A different valid project makes unintended adoption observable.
+    alternate = target.with_name("a1_cancel_open_alternate.json")
+    alternate.write_text(json.dumps({**saved, "Name": "CANCEL_OPEN_SENTINEL"}), encoding="utf-8")
+    original_target = target
+    target = alternate
+    try:
+        if not use_picker("Открыть проект (.json)", {"open", "открыть"}, cancel=True):
+            raise RuntimeError("Native Open cancellation could not be verified")
+        labels = [x.window_text() for x in window.descendants()]
+        if any("CANCEL_OPEN_SENTINEL" in t for t in labels):
+            raise RuntimeError("Cancelled Open adopted the alternate project")
+        if original_target.read_bytes() != original_bytes:
+            raise RuntimeError("Cancelled Open modified the saved project file")
+    finally:
+        target = original_target
+        alternate.unlink(missing_ok=True)
+    print("GUI native project cancellation PASS: Save created no file; Open did not adopt alternate project")
     if not use_picker("Открыть проект (.json)", {"open", "открыть"}):
         return
     for _ in range(30):
