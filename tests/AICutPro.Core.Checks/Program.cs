@@ -4744,6 +4744,37 @@ embeddedHistory.UpdateCurrentWorkspace(bundle);
 Assert(!embeddedHistory.CanRedo && embeddedHistory.CurrentWorkspace == bundle,
     "An annotation edit after undo invalidates stale redo branch");
 
+// A1/B2: edited entity serialization and project history must preserve CIRCLE identity.
+var editCircleDocument = DxfReader.Parse(boundedCircle);
+var editCircleSource = CutProjectDxfWorkspaceCodec.SerializeEditedDocument(editCircleDocument);
+Assert(DxfReader.Parse(editCircleSource).Shapes.Single() is DxfCircle savedCircle &&
+       savedCircle == (DxfCircle)editCircleDocument.Shapes.Single(),
+    "Embedded edit serialization preserves explicit CIRCLE and layer");
+var editArcDocument = DxfReader.Parse(boundedArc);
+Assert(DxfReader.Parse(CutProjectDxfWorkspaceCodec.SerializeEditedDocument(editArcDocument))
+           .Shapes.Single() == editArcDocument.Shapes.Single(),
+    "Embedded edit serialization preserves ARC parameters");
+var directEditSource = CutProjectDxfWorkspaceCodec.SerializeEditedDocument(
+    cleanHistoryDocument);
+var directEditProject = CutProjectDxfWorkspaceCodec.ReplaceSource(
+    projectWithDxf, directEditSource, discardExistingAssignments: true);
+var directEditHistory = new DxfPreviewHistory(bundleSource, bundle);
+var directEditWorkspace = directEditProject.DxfWorkspace!;
+directEditHistory.Push(CutProjectDxfWorkspaceCodec.Load(
+    directEditWorkspace, projectWithDxf.Sheet).Document, [], [], directEditWorkspace);
+var directEditReopened = CutProjectSerializer.Deserialize(
+    CutProjectSerializer.Serialize(directEditProject));
+Assert(directEditReopened.DxfWorkspace == directEditWorkspace &&
+       CutProjectDxfWorkspaceCodec.Load(directEditWorkspace, projectWithDxf.Sheet)
+           .MixedChains.Count == 0,
+    "Edited DXF round trip retains changed source and cleared technology");
+directEditHistory.Undo();
+Assert(directEditHistory.CurrentWorkspace == bundle,
+    "Direct edit undo restores original source and both annotation sidecars");
+directEditHistory.Redo();
+Assert(directEditHistory.CurrentWorkspace == directEditWorkspace,
+    "Direct edit redo restores edited source and cleared sidecars");
+
 var plainProject = CutProject.CreateDefault();
 var plainCopy = CutProjectSerializer.Deserialize(
     CutProjectSerializer.Serialize(plainProject));
