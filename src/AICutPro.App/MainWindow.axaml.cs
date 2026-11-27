@@ -801,14 +801,10 @@ public partial class MainWindow : Window
 
     // Only call after an edit has completed its existing topology and DXF
     // round-trip checks. Commit both the preview and its undo snapshot together.
-    private void CommitDxfPreview(DxfImportResult verified)
+    private async System.Threading.Tasks.Task<bool> CommitDxfPreview(DxfImportResult verified)
     {
-        // A restored DXF project has identity-bound technological annotations.
-        // Refuse geometry mutations until an explicit migration/rebind flow
-        // can update its source and every dependent assignment together.
-        if (_project.DxfWorkspace is not null)
-            throw new FormatException(
-                "Редактирование геометрии встроенного DXF заблокировано: сначала требуется переназначение технологических операций.");
+        if (_activeOperationsEditor is { IsVisible: true })
+            throw new FormatException("Закройте редактор назначений перед изменением DXF.");
         if (_dxfHistory is null)
             throw new InvalidOperationException("No active DXF editing session.");
         var rules=_dxfHistory.CurrentAxisRules;
@@ -835,8 +831,49 @@ public partial class MainWindow : Window
             PreviewPersistentLengthConstraints.RequireCompatibleEdit(
                 before,after,lengths,toleranceMm);
         }
-        _dxfHistory.Push(verified,rules,lengths);
+        if (_project.DxfWorkspace is not null)
+        {
+            var snapshot = CaptureProjectOperation();
+            var source = CutProjectDxfWorkspaceCodec.SerializeEditedDocument(verified);
+            var candidate = CutProjectDxfWorkspaceCodec.ReplaceSource(
+                _project, source, discardExistingAssignments: true);
+            if (ReferenceEquals(candidate, _project))
+                return true;
+            var loaded = CutProjectDxfWorkspaceCodec.Load(candidate.DxfWorkspace!, candidate.Sheet);
+            var dialog = new Window
+            {
+                Title = "AI CutPro | Изменение DXF",
+                Width = 540, Height = 230, CanResize = false,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner
+            };
+            var panel = new StackPanel { Spacing = 12, Margin = new Thickness(18) };
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Геометрия изменится. Все прежние технологические назначения будут сброшены. Undo восстановит прежнюю геометрию и назначения. Продолжить?",
+                TextWrapping = TextWrapping.Wrap
+            });
+            var cancel = new Button { Content = "Отмена" };
+            cancel.Click += (_, _) => dialog.Close(false);
+            var confirm = new Button { Content = "Применить и сбросить назначения" };
+            confirm.Click += (_, _) => dialog.Close(true);
+            panel.Children.Add(cancel);
+            panel.Children.Add(confirm);
+            dialog.Content = panel;
+            if (!await dialog.ShowDialog<bool>(this))
+            {
+                StatusText.Text = "Правка отменена. Проект и назначения не изменены.";
+                return false;
+            }
+            RequireCurrentProjectOperation(snapshot);
+            _dxfHistory.Push(loaded.Document, rules, lengths, candidate.DxfWorkspace);
+            _project = candidate;
+            _selectedDxfLine = null;
+            _dxfDiagnostics = [];
+        }
+        else
+            _dxfHistory.Push(verified,rules,lengths);
         _dxfPreview = _dxfHistory.Current;
+        return true;
     }
 
     private void TranslateWholeDxfClicked(object? sender,
@@ -859,7 +896,7 @@ public partial class MainWindow : Window
         Avalonia.Interactivity.RoutedEventArgs e) =>
         ApplyRigidDxfEdit("масштабирование");
 
-    private void ApplyRigidDxfEdit(string operation)
+    private async void ApplyRigidDxfEdit(string operation)
     {
         try
         {
@@ -928,7 +965,7 @@ public partial class MainWindow : Window
                 Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,edited.NetAreaMm2*1e-9))
                 throw new FormatException("Преобразование не прошло повторную проверку DXF.");
-            CommitDxfPreview(imported);
+            if (!await CommitDxfPreview(imported)) return;
             // Export uses these same controls for optional output-only transforms.
             // Clear parameters already applied to the active drawing so saving
             // cannot accidentally repeat the move or rotation.
@@ -1003,7 +1040,7 @@ public partial class MainWindow : Window
         RenderSheet();
     }
 
-    private void EditDxfVertexClicked(object? sender,
+    private async void EditDxfVertexClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1054,7 +1091,7 @@ public partial class MainWindow : Window
                 Math.Abs(checkedTopology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,edited.NetAreaMm2*1e-9))
                 throw new FormatException("Изменённый DXF не прошёл повторную проверку.");
-            CommitDxfPreview(imported);
+            if (!await CommitDxfPreview(imported)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1072,7 +1109,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PropagateConstrainedVerticesClicked(object? sender,
+    private async void PropagateConstrainedVerticesClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1112,7 +1149,7 @@ public partial class MainWindow : Window
                Math.Abs(topology.NetAreaMm2-updated.NetAreaMm2)>
                    Math.Max(1e-6,Math.Abs(updated.NetAreaMm2)*1e-9))
                 throw new FormatException("Пересчёт не прошёл проверку DXF.");
-            CommitDxfPreview(candidate);
+            if (!await CommitDxfPreview(candidate)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1129,7 +1166,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ChamferDxfVertexClicked(object? sender,
+    private async void ChamferDxfVertexClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1164,7 +1201,7 @@ public partial class MainWindow : Window
                 Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
                 throw new FormatException("Фаска не прошла независимый повторный импорт DXF.");
-            CommitDxfPreview(imported);
+            if (!await CommitDxfPreview(imported)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1180,7 +1217,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void FilletDxfVertexClicked(object? sender,
+    private async void FilletDxfVertexClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1215,7 +1252,7 @@ public partial class MainWindow : Window
                 Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                     Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
                 throw new FormatException("Скругление не прошло повторную проверку DXF.");
-            CommitDxfPreview(imported);
+            if (!await CommitDxfPreview(imported)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1239,7 +1276,7 @@ public partial class MainWindow : Window
         Avalonia.Interactivity.RoutedEventArgs e) =>
         ApplyLineArcFillet(reverse:true);
 
-    private void ApplyLineArcFillet(bool reverse)
+    private async void ApplyLineArcFillet(bool reverse)
     {
         try
         {
@@ -1274,7 +1311,7 @@ public partial class MainWindow : Window
             var topology=ValidatePreviewDrawing(reopened,toleranceMm);
             if(!topology.IsValid||reopened.Count!=edited.Rings.Count)
                 throw new FormatException("LINE/ARC сопряжение не прошло проверку.");
-            CommitDxfPreview(imported);
+            if (!await CommitDxfPreview(imported)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1292,7 +1329,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void FilletArcArcClicked(object? sender,
+    private async void FilletArcArcClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1327,7 +1364,7 @@ public partial class MainWindow : Window
                Math.Abs(topology.NetAreaMm2-edited.NetAreaMm2)>
                    Math.Max(1e-6,Math.Abs(edited.NetAreaMm2)*1e-9))
                 throw new FormatException("ARC/ARC не прошло повторную проверку DXF.");
-            CommitDxfPreview(imported);
+            if (!await CommitDxfPreview(imported)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1353,7 +1390,7 @@ public partial class MainWindow : Window
         Avalonia.Interactivity.RoutedEventArgs e) =>
         ApplyLineVertexChange(insert: false);
 
-    private void ApplyLineVertexChange(bool insert)
+    private async void ApplyLineVertexChange(bool insert)
     {
         try
         {
@@ -1397,7 +1434,7 @@ public partial class MainWindow : Window
                 Math.Abs(topology.NetAreaMm2 - edited.NetAreaMm2) >
                     Math.Max(1e-6, Math.Abs(edited.NetAreaMm2) * 1e-9))
                 throw new FormatException("Изменённый контур не прошёл DXF-проверку.");
-            CommitDxfPreview(candidate);
+            if (!await CommitDxfPreview(candidate)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1414,7 +1451,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SetDxfEdgeLengthClicked(object? sender,
+    private async void SetDxfEdgeLengthClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1456,7 +1493,7 @@ public partial class MainWindow : Window
                 Math.Max(1e-6, Math.Abs(lengthMm) * 1e-9))
                 throw new FormatException("Повторно открытый DXF изменил заданный размер.");
 
-            CommitDxfPreview(candidate);
+            if (!await CommitDxfPreview(candidate)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1473,7 +1510,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void EditSingleArcRadiusClicked(object? sender,
+    private async void EditSingleArcRadiusClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1504,7 +1541,7 @@ public partial class MainWindow : Window
             if(!topology.IsValid)
                 throw new FormatException("Топология изменённой дуги не прошла проверку.");
             var candidate=DxfReader.Parse(serialized);
-            CommitDxfPreview(candidate);
+            if (!await CommitDxfPreview(candidate)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1520,7 +1557,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SetDxfEdgeAngleClicked(object? sender,
+    private async void SetDxfEdgeAngleClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1563,7 +1600,7 @@ public partial class MainWindow : Window
             if (Math.Abs(angularError) > 1e-8)
                 throw new FormatException("Повторно открытый DXF изменил заданный угол.");
 
-            CommitDxfPreview(candidate);
+            if (!await CommitDxfPreview(candidate)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1672,7 +1709,7 @@ public partial class MainWindow : Window
         Avalonia.Interactivity.RoutedEventArgs e) =>
         ApplyEdgeAxisConstraint(horizontal:false);
 
-    private void ApplyEdgeAxisConstraint(bool horizontal)
+    private async void ApplyEdgeAxisConstraint(bool horizontal)
     {
         try
         {
@@ -1704,7 +1741,7 @@ public partial class MainWindow : Window
                (horizontal ? Math.Abs(edge.Start.Y-edge.End.Y)>1e-7
                            : Math.Abs(edge.Start.X-edge.End.X)>1e-7))
                 throw new FormatException("Геометрическое ограничение потеряно при экспорте.");
-            CommitDxfPreview(imported);
+            if (!await CommitDxfPreview(imported)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1722,7 +1759,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void AddCircleHoleClicked(object? sender,
+    private async void AddCircleHoleClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1743,7 +1780,7 @@ public partial class MainWindow : Window
                 _dxfPreview, new PreviewPoint(cx,cy), diameter, toleranceMm);
             // The verified result remains a document with an explicit CIRCLE,
             // allowing subsequent numeric edits and undo/redo.
-            CommitDxfPreview(updated);
+            if (!await CommitDxfPreview(updated)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1759,7 +1796,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void EditArcCircleDiameterClicked(object? sender,
+    private async void EditArcCircleDiameterClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1784,7 +1821,7 @@ public partial class MainWindow : Window
             var topology=ValidatePreviewDrawing(rings,toleranceMm);
             if(!topology.IsValid)
                 throw new FormatException("Изменённый ARC-DXF не прошёл проверку.");
-            CommitDxfPreview(updated);
+            if (!await CommitDxfPreview(updated)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
@@ -1800,7 +1837,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void EditCircleHoleClicked(object? sender,
+    private async void EditCircleHoleClicked(object? sender,
         Avalonia.Interactivity.RoutedEventArgs e)
     {
         try
@@ -1832,7 +1869,7 @@ public partial class MainWindow : Window
 
             // Preserve the actual CIRCLE entity for subsequent edits. Mutate the
             // preview only after all topology and serialization checks succeed.
-            CommitDxfPreview(updated);
+            if (!await CommitDxfPreview(updated)) return;
             ResetView();
             UpdatePartCard();
             UpdateHoleSummary();
