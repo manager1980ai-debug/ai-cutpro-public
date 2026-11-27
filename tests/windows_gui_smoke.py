@@ -765,6 +765,59 @@ def probe_embedded_project_file(executable):
             proc.kill()
 
 
+def probe_embedded_direct_edit(executable):
+    """Exercise cancellation, actual geometry edit and joint history in hosted UI."""
+    fixture = pathlib.Path.cwd() / "external-dxf-fixtures" / "embedded_gui_edit.json"
+    if not fixture.is_file():
+        raise RuntimeError("Closed embedded edit fixture absent")
+    proc = subprocess.Popen([str(executable), "--open-project", str(fixture)],
+                            cwd=executable.parent)
+    def wait_for(find, description):
+        for _ in range(40):
+            value = find()
+            if value:
+                return value
+            time.sleep(0.2)
+        raise RuntimeError("Embedded edit GUI: " + description)
+    def button(window, label):
+        return next((b for b in window.descendants(control_type="Button")
+                     if b.window_text() == label), None)
+    def status(window, fragment):
+        return wait_for(lambda: any(fragment in t.window_text()
+                        for t in window.descendants(control_type="Text")), fragment)
+    try:
+        window = wait_for(lambda: next((w for w in Desktop(backend="uia").windows()
+                          if w.process_id() == proc.pid and
+                          "AI CutPro" in w.window_text()), None), "main window")
+        label = "Добавить круглое отверстие (предпросмотр)"
+        def edit_dialog():
+            wait_for(lambda: button(window, label), label).iface_invoke.Invoke()
+            return wait_for(lambda: next((w for w in Desktop(backend="uia").windows()
+                            if w.process_id() == proc.pid and
+                            "AI CutPro | Изменение DXF" in w.window_text()), None),
+                            "edit confirmation")
+        dialog = edit_dialog()
+        wait_for(lambda: button(dialog, "Отмена"), "cancel").iface_invoke.Invoke()
+        status(window, "Правка отменена")
+        wait_for(lambda: button(window, "Отменить изменение"), "undo").iface_invoke.Invoke()
+        status(window, "Нет изменений DXF для отмены")
+        dialog = edit_dialog()
+        wait_for(lambda: button(dialog, "Применить и сбросить назначения"),
+                 "confirm").iface_invoke.Invoke()
+        status(window, "Новое отверстие")
+        button(window, "Отменить изменение").iface_invoke.Invoke()
+        status(window, "Изменение отменено")
+        button(window, "Повторить изменение").iface_invoke.Invoke()
+        status(window, "Изменение повторено")
+        print("GUI embedded direct edit PASS: cancel, circle edit, Undo/Redo")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main() -> None:
     # GitHub-hosted Windows consoles can default to a legacy codepage; the
     # Russian title is valid UI data and must not make logging fail.
@@ -811,6 +864,7 @@ def main() -> None:
                     probe_selected_dxf_line(executable)
                     probe_project_file(executable)
                     probe_embedded_project_file(executable)
+                    probe_embedded_direct_edit(executable)
                     print(
                         f"GUI smoke passed: title={window.window_text()!r}, "
                         f"pid={process.pid}, handle={window.handle}, "
