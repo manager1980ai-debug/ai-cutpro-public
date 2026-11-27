@@ -64,8 +64,21 @@ def probe_project_picker_roundtrip(window):
                                dialog.window_text())
         # The desktop common dialog normally uses automation id 1148 for FileName.
         file_edit = next((e for e in edits
-                          if e.element_info.automation_id == "1148"), edits[-1])
+                          if e.element_info.automation_id in ("1148", "1001")
+                          and e.is_visible() and e.is_enabled()), None)
+        if file_edit is None:
+            filename_controls = [e for e in edits if e.is_visible() and e.is_enabled()
+                                 and ("file name" in e.window_text().lower()
+                                      or "имя файла" in e.window_text().lower())]
+            if len(filename_controls) != 1:
+                raise RuntimeError("Cannot identify filename field: " + repr([
+                    (e.element_info.automation_id, e.window_text()) for e in edits]))
+            file_edit = filename_controls[0]
         file_edit.set_edit_text(str(target))
+        actual = file_edit.iface_value.CurrentValue
+        if actual != str(target):
+            raise RuntimeError("File picker filename did not update: " + repr(actual))
+        print("Native picker filename verified: " + actual)
         buttons = [b for b in dialog.descendants(control_type="Button")
                    if b.window_text().lower() in submit_names]
         if not buttons:
@@ -73,17 +86,24 @@ def probe_project_picker_roundtrip(window):
                                dialog.window_text() + " / " +
                                repr([b.window_text() for b in
                                      dialog.descendants(control_type="Button")]))
-        buttons[-1].iface_invoke.Invoke()
+        if len(buttons) != 1:
+            raise RuntimeError("Ambiguous native picker submit buttons")
+        buttons[0].iface_invoke.Invoke()
         return True
 
     if not use_picker("Сохранить проект (.json)", {"save", "сохранить"}):
         return
-    for _ in range(30):
+    for _ in range(75):
         if target.is_file() and target.stat().st_size > 0:
             break
         time.sleep(0.2)
-    if not target.is_file():
-        raise RuntimeError("Windows project Save dialog did not write JSON")
+    if not target.is_file() or target.stat().st_size == 0:
+        labels = [t.window_text() for t in window.descendants(control_type="Text")]
+        dialogs = [(w.window_text(), w.handle) for w in Desktop(backend="uia").windows()
+                   if w.process_id() == window.process_id()]
+        raise RuntimeError("Windows project Save dialog did not write JSON; "
+                           + repr(labels[-20:]) + "; windows=" + repr(dialogs)
+                           + "; files=" + repr(list(target.parent.glob("*.json"))))
     saved = json.loads(target.read_text(encoding="utf-8-sig"))
     if saved["FormatVersion"] != 1 or not saved["Parts"]:
         raise RuntimeError("Saved project JSON is missing required fields")
