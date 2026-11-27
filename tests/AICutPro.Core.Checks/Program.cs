@@ -1153,20 +1153,25 @@ for (int caseNo=1;caseNo<=128;caseNo++)
            Math.Abs(measured.NetAreaMm2-expected)<=Math.Max(1e-7,expected*1e-9),
            $"Synthetic translated net area case {caseNo}");
 }
-// Independent manufacturing exports, pinned MIT-licensed FreeCAD source.
-foreach(var item in new[]{("Bottom_Plate_240mm_240mm.dxf",366),
-                          ("PC_Plate_117mm_122mm.dxf",132),
-                          ("Top_Plate_240mm_240mm.dxf",192)})
+// Independent manufacturing exports contain both faces of 4 mm stock
+// and connecting 3D edges. Never flatten those into duplicated cut paths.
+// Counts for the XY plane are independently verified by ezdxf in CI.
+foreach(var item in new[]{("Bottom_Plate_240mm_240mm.dxf",366,122),
+                          ("PC_Plate_117mm_122mm.dxf",132,44),
+                          ("Top_Plate_240mm_240mm.dxf",192,64)})
 {
     var input=File.ReadAllBytes(Path.Combine("tests","fixtures","lgdxrobot2",item.Item1));
     var imported=DxfFileReader.Read(input);
     Assert(imported.AcadVersion=="AC1014" && imported.Document.InsUnits==4,
            $"Manufacturing DXF {item.Item1}: R14 and mm");
-    Assert(imported.Document.Shapes.Count==item.Item2,
-           $"Manufacturing DXF {item.Item1}: entity count matches independent audit");
+    Assert(imported.Document.Shapes.Count==item.Item3,
+           $"Manufacturing DXF {item.Item1}: XY-plane count {imported.Document.Shapes.Count}, expected {item.Item3}");
+    Assert(imported.Document.Warnings.Count(w=>w.Contains("with elevation/extrusion is unsupported"))==item.Item2-item.Item3,
+           $"Manufacturing DXF {item.Item1}: every nonplanar entity is explicitly rejected");
     var gate=GeometryPreflight.Inspect(imported.Document,new Sheet(1000,1000));
-    Assert(!gate.CanGenerateMachineCommands,
-           $"Manufacturing DXF {item.Item1}: machine commands remain disabled");
+    Assert(gate.Status==GeometryPreflightStatus.Rejected && !gate.CanGenerateMachineCommands,
+           $"Manufacturing DXF {item.Item1}: partial 2D preview must not pass preflight");
+    Console.WriteLine($"Manufacturing DXF {item.Item1}: {item.Item3} XY entities, {item.Item2-item.Item3} blocked nonplanar entities");
 }
 // Licensed external DXF files from the CADCraft Corpus (not production blueprints).
 foreach(var name in new[]{"cadcraft-sample-bracket.dxf","cadcraft-sample-floorplan.dxf"})

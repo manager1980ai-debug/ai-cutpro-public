@@ -90,6 +90,17 @@ def verify_manufacturing_examples():
         assert drawing.dxfversion == "AC1014" and drawing.header.get("$INSUNITS") == 4, name
         model = list(drawing.modelspace())
         assert dict(collections.Counter(e.dxftype() for e in model)) == inventory, name
+        # Independently classify the original 3D export, not the core preview.
+        expected_xy = {"Bottom_Plate_240mm_240mm.dxf": 122,
+                       "PC_Plate_117mm_122mm.dxf": 44,
+                       "Top_Plate_240mm_240mm.dxf": 64}[name]
+        def in_xy(entity):
+            points = ([entity.dxf.start, entity.dxf.end]
+                      if entity.dxftype() == "LINE" else [entity.dxf.center])
+            return all(abs(point.z) <= 1e-12 for point in points)
+        xy = [entity for entity in model if in_xy(entity)]
+        assert len(xy) == expected_xy, (name, len(xy))
+        print(f"{name}: independent XY classification: {len(xy)} planar, {len(model)-len(xy)} nonplanar")
         bounds = bbox.extents(model, fast=False)
         dimensions = sorted([bounds.size.x, bounds.size.y])
         assert all(math.isfinite(v) and v > 0 for v in dimensions), name
