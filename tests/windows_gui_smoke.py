@@ -792,10 +792,24 @@ def probe_embedded_direct_edit(executable):
         label = "Добавить круглое отверстие (предпросмотр)"
         def edit_dialog():
             wait_for(lambda: button(window, label), label).iface_invoke.Invoke()
-            return wait_for(lambda: next((w for w in Desktop(backend="uia").windows()
-                            if w.process_id() == proc.pid and
-                            "AI CutPro | Изменение DXF" in w.window_text()), None),
-                            "edit confirmation")
+            def find_confirmation():
+                # Owned Avalonia dialogs may be exposed as child windows, not
+                # top-level desktop windows on hosted Windows UIA.
+                candidates = [w for w in Desktop(backend="uia").windows()
+                              if w.process_id() == proc.pid]
+                candidates += window.descendants(control_type="Window")
+                for candidate in candidates:
+                    if button(candidate, "Применить и сбросить назначения"):
+                        return candidate
+                return None
+            try:
+                return wait_for(find_confirmation, "edit confirmation")
+            except RuntimeError as exc:
+                labels = [t.window_text() for t in window.descendants(control_type="Text")]
+                titles = [w.window_text() for w in Desktop(backend="uia").windows()
+                          if w.process_id() == proc.pid]
+                raise RuntimeError("Edit confirmation absent; application status="
+                                   + repr(labels[-30:]) + "; windows=" + repr(titles)) from exc
         dialog = edit_dialog()
         wait_for(lambda: button(dialog, "Отмена"), "cancel").iface_invoke.Invoke()
         status(window, "Правка отменена")
