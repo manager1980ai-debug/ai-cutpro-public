@@ -17,6 +17,7 @@ def probe_project_picker_roundtrip(window):
     import json
     target = (pathlib.Path.cwd() / "dist" / "a1_picker_roundtrip.json").resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)  # A previous run must not satisfy this test.
 
     def button_named(name):
         matches = [b for b in window.descendants(control_type="Button")
@@ -29,11 +30,20 @@ def probe_project_picker_roundtrip(window):
         button_named(action).iface_invoke.Invoke()
         dialog = None
         for _ in range(50):
-            candidates = [w for w in Desktop(backend="uia").windows()
-                          if w.is_visible() and w.handle != window.handle
-                          and w.process_id() == window.process_id()]
-            if candidates:
-                dialog = candidates[-1]
+            # Match the actual file dialog by its app-supplied title, including
+            # owned child windows exposed differently by Windows UIA.
+            expected_title = ("Сохранить рабочий проект AI CutPro"
+                              if "save" in submit_names else
+                              "Открыть рабочий проект AI CutPro")
+            candidates = Desktop(backend="uia").windows()
+            candidates += window.descendants(control_type="Window")
+            for candidate in candidates:
+                if (candidate.is_visible() and candidate.handle != window.handle
+                        and candidate.window_text() == expected_title
+                        and candidate.process_id() == window.process_id()):
+                    dialog = candidate
+                    break
+            if dialog is not None:
                 break
             time.sleep(0.2)
         if dialog is None:
