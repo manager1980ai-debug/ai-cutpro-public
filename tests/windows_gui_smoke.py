@@ -751,8 +751,7 @@ def probe_embedded_project_file(executable):
             raise RuntimeError(
                 "Embedded DXF source replacement must be visibly available "
                 "with an explicit reset-assignments label")
-        print("GUI DXF replacement entry PASS: explicit reset action visible; "
-              "native picker and confirmation still NOT VERIFIED on hosted runner")
+        print("GUI DXF replacement entry PASS: explicit reset action visible")
         buttons = [b for b in window.descendants(control_type="Button")
                    if b.window_text() == "Технологические линии (предпросмотр)"]
         if len(buttons) != 1:
@@ -817,6 +816,81 @@ def probe_embedded_project_file(executable):
         if not any("DXF: щёлкните по прямой LINE" in t for t in after_cancel):
             raise RuntimeError("Cancelling replacement unexpectedly removed DXF geometry")
         print("GUI project safety PASS: cancel preserves embedded DXF state")
+        # Use the real native DXF picker with a distinct closed circle.
+        # The original open ARC chain is restored by Undo, not by reopening.
+        replacement = (pathlib.Path.cwd() / "dist" / "a1_replacement.dxf").resolve()
+        replacement.write_text(
+            "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n"
+            "0\nSECTION\n2\nENTITIES\n0\nCIRCLE\n8\nREPLACEMENT\n"
+            "10\n100\n20\n65\n40\n10\n0\nENDSEC\n0\nEOF\n",
+            encoding="ascii")
+        def wait_for(find, description):
+            for _ in range(75):
+                found = find()
+                if found:
+                    return found
+                time.sleep(0.2)
+            raise RuntimeError("DXF replacement: " + description)
+        def named(owner, label):
+            return next((b for b in owner.descendants(control_type="Button")
+                         if b.window_text() == label and b.is_visible()), None)
+        def owned(title):
+            candidates = Desktop(backend="uia").windows()
+            candidates += window.descendants(control_type="Window")
+            return next((w for w in candidates if w.process_id() == proc.pid
+                         and w.window_text() == title and w.is_visible()), None)
+        def status(fragment):
+            wait_for(lambda: any(fragment in t.window_text() for t in
+                                 window.descendants(control_type="Text")), fragment)
+        def choose_replacement(cancel_picker=False):
+            wait_for(lambda: named(window, "Заменить DXF проекта (сброс назначений)"),
+                     "replacement action").iface_invoke.Invoke()
+            picker = wait_for(lambda: owned("Выбрать новый исходный DXF проекта (миллиметры)"),
+                              "native picker")
+            field = next((e for e in picker.descendants(control_type="Edit")
+                          if e.element_info.automation_id in ("1148", "1001")
+                          and e.is_visible() and e.is_enabled()), None)
+            if field is None:
+                raise RuntimeError("DXF picker filename control missing")
+            field.set_focus()
+            field.type_keys("^a", set_foreground=True)
+            field.type_keys(str(replacement), with_spaces=True, pause=0.01,
+                            set_foreground=True)
+            if field.iface_value.CurrentValue != str(replacement):
+                raise RuntimeError("DXF picker filename mismatch")
+            field.type_keys("{ESC}" if cancel_picker else "{ENTER}", set_foreground=True)
+            wait_for(lambda: not owned("Выбрать новый исходный DXF проекта (миллиметры)"),
+                     "native picker did not close")
+            if not cancel_picker:
+                return wait_for(lambda: owned("AI CutPro | Замена DXF и сброс назначений"),
+                                "reset confirmation")
+        choose_replacement(cancel_picker=True)
+        status("Круговых элементов нет.")
+        modal = choose_replacement()
+        wait_for(lambda: named(modal, "Отменить замену"), "cancel reset").iface_invoke.Invoke()
+        status("Замена отменена. Исходный DXF и назначения не изменены.")
+        status("Круговых элементов нет.")
+        modal = choose_replacement()
+        wait_for(lambda: named(modal, "Заменить DXF и сбросить ВСЕ назначения"),
+                 "confirm reset").iface_invoke.Invoke()
+        status("DXF заменён, все прежние назначения сброшены.")
+        status("Ø 20 мм: 1 шт.")
+        wait_for(lambda: named(window, "Отменить изменение"), "Undo").iface_invoke.Invoke()
+        status("Изменение отменено")
+        status("Круговых элементов нет.")
+        wait_for(lambda: named(window, "Технологические линии (предпросмотр)"),
+                 "technology editor").iface_invoke.Invoke()
+        restored_editor = wait_for(lambda: owned("AI CutPro | Технологические линии")
+            or next((w for w in Desktop(backend="uia").windows()
+                     if w.process_id() == proc.pid and
+                     "Технологические линии" in w.window_text()), None), "restored editor")
+        wait_for(lambda: any("смешанных 1" in t.window_text() for t in
+                             restored_editor.descendants(control_type="Text")),
+                 "original mixed annotation restored by Undo")
+        restored_editor.close()
+        status("Назначения DXF сохранены в текущем проекте")
+        print("GUI native DXF replacement PASS: picker cancel, reset cancel, confirm, geometry and annotation Undo")
+
     finally:
         proc.terminate()
         try:
