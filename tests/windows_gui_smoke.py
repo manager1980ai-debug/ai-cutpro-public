@@ -85,17 +85,17 @@ def probe_project_picker_roundtrip(window):
         if actual != str(target):
             raise RuntimeError("File picker filename did not update: " + repr(actual))
         print("Native picker filename verified: " + actual)
-        buttons = [b for b in dialog.descendants(control_type="Button")
-                   if b.window_text().lower() in submit_names]
-        if not buttons:
-            raise RuntimeError("Cannot submit Windows picker: " +
-                               dialog.window_text() + " / " +
-                               repr([b.window_text() for b in
-                                     dialog.descendants(control_type="Button")]))
-        if len(buttons) != 1:
-            raise RuntimeError("Ambiguous native picker submit buttons")
-        # Physical click commits the filename edit before the shell handles OK.
-        buttons[0].click_input()
+        # The Explorer common dialog can expose duplicate named buttons
+        # through nested UIA providers. Submit via the focused filename
+        # control's Enter key instead of guessing which button is real.
+        file_edit.type_keys("{ENTER}", set_foreground=True)
+        for _ in range(50):
+            if not any(w.handle == dialog.handle and w.is_visible()
+                       for w in Desktop(backend="uia").windows()):
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Native picker did not close after Enter")
         return True
 
     if not use_picker("Сохранить проект (.json)", {"save", "сохранить"}):
@@ -112,6 +112,7 @@ def probe_project_picker_roundtrip(window):
                            + repr(labels[-20:]) + "; windows=" + repr(dialogs)
                            + "; files=" + repr(list(target.parent.glob("*.json"))))
     saved = json.loads(target.read_text(encoding="utf-8-sig"))
+    print("Native Save produced requested file: " + str(target))
     if saved["FormatVersion"] != 1 or not saved["Parts"]:
         raise RuntimeError("Saved project JSON is missing required fields")
     if not use_picker("Открыть проект (.json)", {"open", "открыть"}):
