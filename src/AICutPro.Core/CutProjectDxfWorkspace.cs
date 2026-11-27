@@ -152,6 +152,91 @@ public static class CutProjectDxfWorkspaceCodec
         return candidate;
     }
 
+    /// <summary>Serialize verified preview entities without converting circles or layers.</summary>
+    public static string SerializeEditedDocument(DxfImportResult document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (document.InsUnits != 4 || document.Shapes.Count is < 1 or > 1000)
+            throw new FormatException("Invalid embedded DXF edit.");
+        var output = new System.Text.StringBuilder();
+        void Pair(int code, string value)
+        {
+            output.Append(code.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append('\n').Append(value).Append('\n');
+        }
+        void Number(int code, double value)
+        {
+            if (!double.IsFinite(value)) throw new FormatException("Nonfinite DXF value.");
+            Pair(code, value.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        void Point(int xCode, int yCode, Point2 point)
+        {
+            Number(xCode, point.X); Number(yCode, point.Y);
+        }
+        void Entity(string type, string layer)
+        {
+            if (string.IsNullOrWhiteSpace(layer) || layer.Trim() != layer ||
+                layer.Any(c => c < 32 || c > 126))
+                throw new FormatException("Unsupported ASCII DXF layer.");
+            Pair(0, type); Pair(8, layer);
+        }
+        void Polyline(string layer, IReadOnlyList<Point2> vertices,
+            bool closed, IReadOnlyList<double>? bulges = null)
+        {
+            if (bulges is not null && bulges.Count != vertices.Count)
+                throw new FormatException("Invalid bulge count.");
+            Entity("LWPOLYLINE", layer);
+            Number(90, vertices.Count); Number(70, closed ? 1 : 0);
+            for (int i = 0; i < vertices.Count; i++)
+            {
+                Point(10, 20, vertices[i]);
+                if (bulges is not null) Number(42, bulges[i]);
+            }
+        }
+        Pair(0, "SECTION"); Pair(2, "HEADER");
+        Pair(9, "$ACADVER"); Pair(1, "AC1032");
+        Pair(9, "$INSUNITS"); Pair(70, "4");
+        Pair(0, "ENDSEC"); Pair(0, "SECTION"); Pair(2, "ENTITIES");
+        foreach (var shape in document.Shapes)
+        {
+            switch (shape)
+            {
+                case DxfLine line:
+                    Entity("LINE", line.Layer);
+                    Point(10, 20, line.Start); Point(11, 21, line.End); break;
+                case DxfCircle circle:
+                    Entity("CIRCLE", circle.Layer);
+                    Point(10, 20, circle.Center); Number(40, circle.Radius); break;
+                case DxfArc arc:
+                    Entity("ARC", arc.Layer);
+                    Point(10, 20, arc.Center); Number(40, arc.Radius);
+                    Number(50, arc.StartDeg); Number(51, arc.EndDeg); break;
+                case DxfPolyline poly:
+                    Polyline(poly.Layer, poly.Vertices, poly.Closed); break;
+                case DxfBulgedPolyline bulged:
+                    Polyline(bulged.Layer, bulged.Vertices, bulged.Closed, bulged.Bulges); break;
+                default: throw new FormatException("Unsupported DXF entity.");
+            }
+        }
+        Pair(0, "ENDSEC"); Pair(0, "EOF");
+        var source = output.ToString();
+        var reopened = ParseSource(source);
+        if (reopened.Shapes.Count != document.Shapes.Count ||
+            !reopened.Shapes.Zip(document.Shapes).All(pair => SameShape(pair.First, pair.Second)))
+            throw new FormatException("Edited DXF entity identity changed on serialization.");
+        return source;
+
+        static bool SameShape(DxfShape a, DxfShape b) => (a, b) switch
+        {
+            (DxfPolyline x, DxfPolyline y) => x.Layer == y.Layer &&
+                x.Closed == y.Closed && x.Vertices.SequenceEqual(y.Vertices),
+            (DxfBulgedPolyline x, DxfBulgedPolyline y) => x.Layer == y.Layer &&
+                x.Closed == y.Closed && x.Vertices.SequenceEqual(y.Vertices) &&
+                x.Bulges.SequenceEqual(y.Bulges),
+            _ => a == b
+        };
+    }
+
     public static void Validate(CutProjectDxfWorkspace workspace, Sheet sheet)
         => _ = Load(workspace, sheet);
 
