@@ -2501,6 +2501,7 @@ public partial class MainWindow : Window
             StatusText.Text = candidate.DxfWorkspace is null
                 ? "Проект сохранён в JSON без DXF. Команд станку нет."
                 : "Проект, исходный DXF и назначения сохранены в одном JSON. Команд станку нет.";
+            StatusText.Text += "\nФайл: " + System.IO.Path.GetFullPath(localPath);
         }
         catch (Exception ex) when (ex is FormatException or ArgumentException or IOException
                                    or UnauthorizedAccessException or NotSupportedException)
