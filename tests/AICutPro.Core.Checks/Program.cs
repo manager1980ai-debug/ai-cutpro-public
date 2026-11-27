@@ -5077,6 +5077,14 @@ if (!string.IsNullOrWhiteSpace(projectFixtureDirectory))
     File.WriteAllText(
         Path.Combine(projectFixtureDirectory, "embedded_gui_project.json"),
         CutProjectSerializer.Serialize(projectWithDxf));
+    // Closed contour fixture for direct CAD editing; the open-chain fixture
+    // above deliberately cannot pass the closed-contour topology gate.
+    var closedEditSource = CurvedEnvelopeDxf(
+        "0\\nLWPOLYLINE\\n8\\nOUTER\\n90\\n4\\n70\\n1\\n10\\n10\\n20\\n10\\n10\\n190\\n20\\n10\\n10\\n190\\n20\\n120\\n10\\n10\\n20\\n120\\n".Replace("\\n", "\n"));
+    var closedEditProject = CutProjectDxfWorkspaceCodec.ReplaceSource(
+        projectWithDxf, closedEditSource, discardExistingAssignments: true);
+    File.WriteAllText(Path.Combine(projectFixtureDirectory, "embedded_gui_edit.json"),
+        CutProjectSerializer.Serialize(closedEditProject));
 }
 
 Console.WriteLine("AI CutPro core checks passed.");
