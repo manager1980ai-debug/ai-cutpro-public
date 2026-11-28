@@ -109,9 +109,39 @@ def verify_manufacturing_examples():
         xy = [entity for entity in model if in_xy(entity)]
         assert len(xy) == expected_xy, (name, len(xy))
         print(f"{name}: independent XY classification: {len(xy)} planar, {len(model)-len(xy)} nonplanar")
+        import json
+        import os
+        audit_dir = pathlib.Path(os.environ.get("AI_CUTPRO_CI_DXF_DIR", "external-dxf-fixtures"))
+        rows = json.loads((audit_dir / (name + ".geometry.json")).read_text(encoding="utf-8-sig"))
+        assert len(rows) == len(xy), name
+        max_error = 0.0
+        for index, (row, entity) in enumerate(zip(rows, xy)):
+            kind = entity.dxftype()
+            assert row["Type"] == kind and row["Layer"] == entity.dxf.layer, (name, index, "identity")
+            if kind == "LINE":
+                expected = [entity.dxf.start.x, entity.dxf.start.y,
+                            entity.dxf.end.x, entity.dxf.end.y]
+            else:
+                expected = [entity.dxf.center.x, entity.dxf.center.y, entity.dxf.radius]
+                if kind == "ARC":
+                    expected.extend([entity.dxf.start_angle, entity.dxf.end_angle])
+            assert len(row["Values"]) == len(expected), (name, index)
+            for column, (actual, reference) in enumerate(zip(row["Values"], expected)):
+                error = abs(actual - reference)
+                assert math.isfinite(actual) and error <= 1e-8, (name, index, column, actual, reference)
+                max_error = max(max_error, error)
+            if kind == "ARC":
+                actual_sweep = (row["Values"][4] - row["Values"][3]) % 360
+                reference_sweep = (expected[4] - expected[3]) % 360
+                actual_length = row["Values"][2] * math.radians(actual_sweep)
+                reference_length = expected[2] * math.radians(reference_sweep)
+                assert abs(actual_length - reference_length) <= 1e-7, (name, index, "arc length")
+        print(f"{name}: independent per-entity coordinate/radius/angle audit PASS; "
+              f"{len(rows)} shapes; max parameter difference {max_error:.12g}")
         bounds = bbox.extents(model, fast=False)
         dimensions = sorted([bounds.size.x, bounds.size.y])
         assert all(math.isfinite(v) and v > 0 for v in dimensions), name
+        assert all(abs(a-b) <= 1e-6 for a,b in zip(dimensions, sorted([width,height]))), (name, dimensions)
         # Nominal plate dimensions are documented in the upstream filenames;
         # report measured extents without assuming exact nominal equality.
         print(f"{name}: independent manufacturing DXF audit PASS; "

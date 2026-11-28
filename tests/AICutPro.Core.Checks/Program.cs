@@ -1172,6 +1172,23 @@ foreach(var item in new[]{("Bottom_Plate_240mm_240mm.dxf",366,122),
     Assert(gate.Status==GeometryPreflightStatus.Rejected && !gate.CanGenerateMachineCommands,
            $"Manufacturing DXF {item.Item1}: partial 2D preview must not pass preflight");
     Console.WriteLine($"Manufacturing DXF {item.Item1}: {item.Item3} XY entities, {item.Item2-item.Item3} blocked nonplanar entities");
+    var manufacturingAuditDir=Environment.GetEnvironmentVariable("AI_CUTPRO_CI_DXF_DIR");
+    if(!string.IsNullOrWhiteSpace(manufacturingAuditDir))
+    {
+        Directory.CreateDirectory(manufacturingAuditDir);
+        // Preserve original entity ordering and full analytic parameters.
+        // No DXF re-export or flattening is involved in this comparison.
+        var auditRows=imported.Document.Shapes.Select(shape=>shape switch
+        {
+            DxfLine l => new { Type="LINE", Layer=l.Layer, Values=new[]{l.Start.X,l.Start.Y,l.End.X,l.End.Y} },
+            DxfCircle o => new { Type="CIRCLE", Layer=o.Layer, Values=new[]{o.Center.X,o.Center.Y,o.Radius} },
+            DxfArc a => new { Type="ARC", Layer=a.Layer, Values=new[]{a.Center.X,a.Center.Y,a.Radius,a.StartDeg,a.EndDeg} },
+            _ => throw new InvalidOperationException("Unexpected manufacturing fixture shape")
+        }).ToArray();
+        File.WriteAllText(Path.Combine(manufacturingAuditDir,item.Item1+".geometry.json"),
+                          JsonSerializer.Serialize(auditRows));
+    }
+
 }
 // Licensed external DXF files from the CADCraft Corpus (not production blueprints).
 foreach(var name in new[]{"cadcraft-sample-bracket.dxf","cadcraft-sample-floorplan.dxf"})
