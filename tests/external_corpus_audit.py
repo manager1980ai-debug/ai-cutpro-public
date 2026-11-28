@@ -87,7 +87,15 @@ def verify_manufacturing_examples():
         data = path.read_bytes()
         assert hashlib.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest() == sha, name
         drawing = ezdxf.readfile(path)
-        assert drawing.dxfversion == "AC1014" and drawing.header.get("$INSUNITS") == 4, name
+        # ezdxf upgrades R13/R14 documents to R2000 in memory.
+        # Verify the source version independently before that normalization.
+        from ezdxf.lldxf.validator import dxf_info
+        with path.open("rt", encoding="ascii") as source:
+            info = dxf_info(source)
+        assert info.version == "AC1014", (name, info.version)
+        assert drawing.dxfversion in ("AC1014", "AC1015"), (name, drawing.dxfversion)
+        assert drawing.header.get("$INSUNITS") == 4, (name, drawing.header.get("$INSUNITS"))
+        print(f"{name}: source {info.version}, ezdxf loaded {drawing.dxfversion}, mm")
         model = list(drawing.modelspace())
         assert dict(collections.Counter(e.dxftype() for e in model)) == inventory, name
         # Independently classify the original 3D export, not the core preview.
